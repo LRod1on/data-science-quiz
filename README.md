@@ -1,4 +1,4 @@
-# salute-demo-app
+rfr# salute-demo-app
 
 Это небольшое Todo приложение (добавление, выполнение и удаление задач. [См. видео](https://youtu.be/P-o2rwHhARo)) демонстрирует пример взаимодействия с [Assistant Client](https://github.com/salute-developers/salutejs-client).
 
