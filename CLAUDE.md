@@ -19,8 +19,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Stack
 
-**Frontend** (существующий): React (CRA), `@salutejs/client`, `styled-components`, `chart.js` + `react-chartjs-2`
-- Файлы `.jsx` (не `.tsx`). TypeScript установлен, но не используется — не менять без явной задачи
+**Frontend** (`/` корень): React (CRA), @salutejs/client, styled-components
+- `chart.js` + `react-chartjs-2` — для радар-чарта результатов (установить в фазе 0.2)
+- Файлы .jsx (не .tsx). TypeScript установлен, но не используется
 
 **Backend** (планируется в `/backend`): Python 3.11+, FastAPI, httpx
 
@@ -51,7 +52,11 @@ After changing `.env`, a full restart is required (not just hot reload).
 - Обратно — через `assistant.sendData()`
 - `scenario-example.zip` в корне — `.sc`-сценарии на серверах Сбера
 
-**Открытый вопрос:** `.sc`-сценарии переписываются или остаются тонким роутером к FastAPI — решается в фазе 1 (см. `PLAN.md`).
+**Архитектура (решение зафиксировано в PLAN.md):**
+- `.sc`-сценарии — тонкий NLU-слой: ловят команды (START_INTERVIEW, NEXT_QUESTION, GIVE_UP, END_INTERVIEW) и прокидывают сырой текст ответа как USER_ANSWER
+- Весь mozg — в Python FastAPI (папка `backend/`)
+- React вызывает FastAPI через fetch, FastAPI зовёт OpenRouter
+- TTS-озвучка feedback — через `sendData` обратно в `.sc`
 
 ## Architecture
 
@@ -78,4 +83,5 @@ App (state + assistant logic)
 - Ассистент инициализируется один раз в конструкторе `App` — не переносить в хуки или места с возможным ре-рендером
 - `item_selector.items` использует 1-based `number` — ассистент опирается на это для порядковых голосовых команд
 - Не коммитить `.env`
-- Не трогать `scenario-example.zip` без явной команды
+- `scenario-example.zip` переписывается в фазе 1 на новый набор action-ов
+- Распакованные .sc-файлы хранятся в `smartapp-backend/` (коммитим), zip-пересборка — только для загрузки в SmartApp Studio
