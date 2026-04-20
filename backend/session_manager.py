@@ -18,6 +18,8 @@ class SessionState(BaseModel):
     per_question_scores: list[float] = Field(default_factory=list)
     final_scores: dict[str, float] = Field(default_factory=dict)
     chat_history: list[dict[str, str]] = Field(default_factory=list)
+    asked_questions: list[str] = Field(default_factory=list)
+    history_checkpoint: int = 0
     started_at: datetime = Field(default_factory=datetime.utcnow)
     last_activity_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -47,6 +49,8 @@ class SessionManager:
             current_question=None,
             per_question_scores=[],
             chat_history=[],
+            asked_questions=[],
+            history_checkpoint=0,
         )
 
     def finalize_topic(self, session_id: str) -> SessionState:
@@ -64,6 +68,8 @@ class SessionManager:
             question_index=0,
             current_question=None,
             chat_history=[],
+            asked_questions=[],
+            history_checkpoint=0,
         )
 
     def cleanup_stale(self, max_age_minutes: int = 60) -> int:
