@@ -1,16 +1,13 @@
 require: slotfilling/slotFilling.sc
   module = sys.zb-common
-  
+
 # Подключение javascript обработчиков
 require: js/getters.js
 require: js/reply.js
 require: js/actions.js
 
 # Подключение сценарных файлов
-require: sc/addNote.sc
-require: sc/doNote.sc
-require: sc/deleteNote.sc
-require: sc/noteDone.sc
+require: sc/interview.sc
 
 
 patterns:
@@ -21,14 +18,11 @@ theme: /
         # При запуске приложения с кнопки прилетит сообщение /start.
         q!: $regex</start>
         # При запуске приложения с голоса прилетит сказанная фраза.
-        # Если названме приложения отличается, то выполнится переход к состоянию Fallback, будет проиграно "Я не понимаю".
-        # Обратите внимание, что если в названии приложения есть тире, их нужно заменить на пробелы ("my-canvas-test" -> "my canvas test")
-        q!: (запусти | открой | вруби) my canvas test
-        a: Начнём.
+        q!: (запусти | открой | вруби) клиентсервапп
+        a: Привет! Я проведу с тобой интервью по Data Science. Выбери тему: Python, Classical ML, Deep Learning или NLP и Computer Vision.
 
     state: Fallback
         event!: noMatch
         script:
             log('entryPoint: Fallback: context: ' + JSON.stringify($context))
         a: Я не понимаю
-

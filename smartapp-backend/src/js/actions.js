@@ -1,20 +1,37 @@
-function addNote(note, context) {
+function startInterview(topic, context) {
     addAction({
-        type: "add_note",
-        note: note
+        type: "START_INTERVIEW",
+        topic: topic
     }, context);
 }
 
-function doneNote(id, context){
+function userAnswer(text, context) {
     addAction({
-        type: "done_note",
-        id: id
+        type: "USER_ANSWER",
+        text: text
     }, context);
 }
 
-function deleteNote(id, context){
+function nextQuestion(context) {
     addAction({
-        type: "delete_note",
-        id: id
+        type: "NEXT_QUESTION"
+    }, context);
+}
+
+function giveUp(context) {
+    addAction({
+        type: "GIVE_UP"
+    }, context);
+}
+
+function endInterview(context) {
+    addAction({
+        type: "END_INTERVIEW"
+    }, context);
+}
+
+function showResults(context) {
+    addAction({
+        type: "SHOW_RESULTS"
     }, context);
 }
