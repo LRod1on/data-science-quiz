@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { TOPICS } from '../constants/topics';
 
 const Wrapper = styled.div`
-  min-height: 100vh;
+  min-height: calc(100vh - var(--bottom-inset, 0px));
   display: flex;
   flex-direction: column;
   align-items: center;

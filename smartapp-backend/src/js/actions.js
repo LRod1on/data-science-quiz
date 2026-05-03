@@ -12,6 +12,12 @@ function userAnswer(text, context) {
     }, context);
 }
 
+function finishAnswer(context) {
+    addAction({
+        type: "FINISH_ANSWER"
+    }, context);
+}
+
 function nextQuestion(context) {
     addAction({
         type: "NEXT_QUESTION"

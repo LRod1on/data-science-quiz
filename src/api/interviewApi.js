@@ -39,10 +39,10 @@ export async function evaluateAnswer(sessionId, text) {
   return apiFetch('/evaluate', { session_id: sessionId, text });
 }
 
-export async function nextQuestion(sessionId) {
-  return apiFetch('/next', { session_id: sessionId });
-}
-
 export async function skipQuestion(sessionId) {
   return apiFetch('/skip', { session_id: sessionId });
+}
+
+export async function finishInterview(sessionId) {
+  return apiFetch('/finish', { session_id: sessionId });
 }

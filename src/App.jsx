@@ -9,8 +9,8 @@ import { ResultView } from './views/ResultView';
 import {
   startInterview,
   evaluateAnswer,
-  nextQuestion,
   skipQuestion,
+  finishInterview,
 } from './api/interviewApi';
 
 const initializeAssistant = (getState) => {
@@ -42,6 +42,7 @@ export class App extends React.Component {
       currentTopic: null,      // 'python' | 'classical_ml' | 'deep_learning' | 'nlp_cv'
       questionIndex: 0,        // 0-based
       questionText: '',
+      answerBuffer: '',        // accumulated user fragments until FINISH_ANSWER
       isLoading: false,
       radarScores: {
         python: null,
@@ -58,8 +59,9 @@ export class App extends React.Component {
       console.log('assistant.on(data)', event);
       if (event.type === 'character') {
         console.log(`assistant.on(data): character: "${event?.character?.id}"`);
-      } else if (event.type === 'insets') {
-        console.log('assistant.on(data): insets');
+      } else if (event.type === 'insets' || event.type === 'dynamic_insets') {
+        const bottom = event?.insets?.bottom ?? 0;
+        document.documentElement.style.setProperty('--bottom-inset', `${bottom}px`);
       } else {
         const { action } = event;
         this.dispatchAssistantAction(action);
@@ -112,10 +114,11 @@ export class App extends React.Component {
         return this.handleStartInterview(action.topic);
       case 'USER_ANSWER':
         return this.handleUserAnswer(action.text);
+      case 'FINISH_ANSWER':
+        return this.handleFinishAnswer();
       case 'NEXT_QUESTION':
-        return this.handleNextQuestion();
       case 'GIVE_UP':
-        return this.handleGiveUp();
+        return this.handleNextQuestion();
       case 'END_INTERVIEW':
         return this.handleEndInterview();
       case 'SHOW_RESULTS':
@@ -127,13 +130,24 @@ export class App extends React.Component {
 
   _speakText(text) {
     if (!text) return;
-    const unsubscribe = this.assistant.sendData(
-      { action: { action_id: 'SPEAK' }, eventData: { text } },
-      (data) => {
-        console.log('sendData SPEAK ack:', data);
-        if (typeof unsubscribe === 'function') unsubscribe();
-      }
-    );
+    if (process.env.NODE_ENV === 'development') {
+      window.speechSynthesis?.cancel();
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang = 'ru-RU';
+      window.speechSynthesis?.speak(utt);
+      return;
+    }
+    try {
+      const unsubscribe = this.assistant.sendData(
+        { action: { action_id: 'SPEAK' }, eventData: { text } },
+        (data) => {
+          console.log('sendData SPEAK ack:', data);
+          if (typeof unsubscribe === 'function') unsubscribe();
+        }
+      );
+    } catch (err) {
+      console.warn('_speakText sendData error:', err);
+    }
   }
 
   _handleEvaluateResponse(data) {
@@ -144,6 +158,7 @@ export class App extends React.Component {
         status: 'results',
         isLoading: false,
         lastError: null,
+        answerBuffer: '',
         radarScores: {
           ...prev.radarScores,
           [prev.currentTopic]: final_scores?.[prev.currentTopic] ?? null,
@@ -159,6 +174,7 @@ export class App extends React.Component {
         questionIndex: question_index,
         isLoading: false,
         lastError: null,
+        answerBuffer: '',
       });
       this._speakText(feedback);
       return;
@@ -170,12 +186,13 @@ export class App extends React.Component {
         questionText: feedback,
         isLoading: false,
         lastError: null,
+        answerBuffer: '',
       });
       this._speakText(feedback);
       return;
     }
 
-    // ERROR or unknown action
+    // ERROR or unknown action — keep the buffer so the user can retry "готово"
     this.setState({ isLoading: false, lastError: feedback || 'Ошибка сервера' });
     this._speakText(feedback);
   }
@@ -185,8 +202,9 @@ export class App extends React.Component {
     this.setState({
       status: 'interview',
       currentTopic: topic,
-      questionIndex: 0,
+      questionIndex: 1,
       questionText: '',
+      answerBuffer: '',
       isLoading: true,
       lastError: null,
     });
@@ -199,11 +217,29 @@ export class App extends React.Component {
     }
   }
 
-  async handleUserAnswer(text) {
+  handleUserAnswer(text) {
     if (this.state.status !== 'interview' || this.state.isLoading) return;
+    // Guard against the createSmartappDebugger initPhrase arriving late and being
+    // misrouted to USER_ANSWER. Launch phrases start with "запусти/открой/вруби".
+    if (/^(запусти|открой|вруби)\s/i.test(text)) return;
+    const fragment = (text || '').trim();
+    if (!fragment) return;
+    this.setState((prev) => ({
+      answerBuffer: prev.answerBuffer ? `${prev.answerBuffer} ${fragment}` : fragment,
+      lastError: null,
+    }));
+  }
+
+  async handleFinishAnswer() {
+    if (this.state.status !== 'interview' || this.state.isLoading) return;
+    const buffered = this.state.answerBuffer.trim();
+    if (!buffered) {
+      this._speakText('Я не услышал ответ. Скажите его и затем «готово».');
+      return;
+    }
     this.setState({ isLoading: true, lastError: null });
     try {
-      const data = await evaluateAnswer(this.sessionId, text);
+      const data = await evaluateAnswer(this.sessionId, buffered);
       this._handleEvaluateResponse(data);
     } catch (err) {
       this.setState({ isLoading: false, lastError: err.message });
@@ -212,20 +248,20 @@ export class App extends React.Component {
 
   async handleNextQuestion() {
     if (this.state.isLoading) return;
-    this.setState({ isLoading: true, lastError: null });
+    this.setState({ isLoading: true, lastError: null, answerBuffer: '' });
     try {
-      const data = await nextQuestion(this.sessionId);
+      const data = await skipQuestion(this.sessionId);
       this._handleEvaluateResponse(data);
     } catch (err) {
       this.setState({ isLoading: false, lastError: err.message });
     }
   }
 
-  async handleGiveUp() {
+  async handleFinishInterview() {
     if (this.state.isLoading) return;
-    this.setState({ isLoading: true, lastError: null });
+    this.setState({ isLoading: true, lastError: null, answerBuffer: '' });
     try {
-      const data = await skipQuestion(this.sessionId);
+      const data = await finishInterview(this.sessionId);
       this._handleEvaluateResponse(data);
     } catch (err) {
       this.setState({ isLoading: false, lastError: err.message });
@@ -238,6 +274,7 @@ export class App extends React.Component {
       currentTopic: null,
       questionIndex: 0,
       questionText: '',
+      answerBuffer: '',
       isLoading: false,
       lastError: null,
     });
@@ -254,6 +291,7 @@ export class App extends React.Component {
       currentTopic,
       questionIndex,
       questionText,
+      answerBuffer,
       isLoading,
       radarScores,
       lastError,
@@ -271,11 +309,13 @@ export class App extends React.Component {
             topic={currentTopic}
             questionIndex={questionIndex}
             questionText={questionText}
+            answerBuffer={answerBuffer}
             isLoading={isLoading}
             isListening={isListening}
             lastError={lastError}
+            onSubmit={() => this.handleFinishAnswer()}
             onNext={() => this.handleNextQuestion()}
-            onGiveUp={() => this.handleGiveUp()}
+            onFinish={() => this.handleFinishInterview()}
           />
         )}
         {status === 'results' && (

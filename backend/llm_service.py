@@ -1,4 +1,4 @@
-"""LLM service: question selection and answer evaluation via OpenRouter."""
+"""LLM service: question selection and answer evaluation via GigaChat."""
 
 from __future__ import annotations
 
@@ -8,28 +8,67 @@ import logging
 import os
 import random
 import re
+import time
+import uuid
+import warnings
 
-from openai import AsyncOpenAI, RateLimitError
+import httpx
 from pydantic import BaseModel, ValidationError
 
 from questions import QUESTIONS
 
 logger = logging.getLogger(__name__)
 
+# Suppress SSL warning — Sber uses a Russian CA not in Python's default bundle
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
+
 # ---------------------------------------------------------------------------
-# Client (module singleton, reused across requests)
+# Config
 # ---------------------------------------------------------------------------
 
-_api_key = os.getenv("OPENROUTER_API_KEY", "")
-if not _api_key:
-    logger.warning("OPENROUTER_API_KEY is not set")
+_AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY", "")
+if not _AUTH_KEY:
+    logger.warning("GIGACHAT_AUTH_KEY is not set")
 
-client = AsyncOpenAI(
-    api_key=_api_key or "dummy",
-    base_url="https://openrouter.ai/api/v1",
-    timeout=30.0,
-)
-MODEL = os.getenv("OPENROUTER_MODEL", "qwen/qwen-2.5-72b-instruct")
+MODEL = os.getenv("GIGACHAT_MODEL", "GigaChat")
+
+_TOKEN_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+_CHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
+
+# ---------------------------------------------------------------------------
+# Token cache (module-level, refreshed on expiry)
+# ---------------------------------------------------------------------------
+
+_access_token: str = ""
+_token_expires_at: float = 0.0
+_token_lock = asyncio.Lock()
+
+
+async def _get_access_token() -> str:
+    global _access_token, _token_expires_at
+    async with _token_lock:
+        if _access_token and time.time() < _token_expires_at - 60:
+            return _access_token
+
+        async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
+            resp = await client.post(
+                _TOKEN_URL,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Accept": "application/json",
+                    "RqUID": str(uuid.uuid4()),
+                    "Authorization": f"Basic {_AUTH_KEY}",
+                },
+                data={"scope": "GIGACHAT_API_PERS"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        _access_token = data["access_token"]
+        _token_expires_at = data["expires_at"] / 1000  # ms → s
+        logger.debug("GigaChat token refreshed, expires in ~30 min")
+        return _access_token
+
 
 # ---------------------------------------------------------------------------
 # Prompts
@@ -86,19 +125,11 @@ _FALLBACK = EvaluationResult(
 
 
 def _parse_llm_json(raw: str) -> dict | None:
-    """4-step JSON extraction from LLM output.
-
-    1. Direct json.loads
-    2. Regex-extract first {...} block (handles ```json ... ``` wrappers)
-    3. Returns None — caller does one retry with a stricter prompt
-    """
-    # Step 1
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, ValueError):
         pass
 
-    # Step 2
     m = re.search(r"\{.*\}", raw, re.DOTALL)
     if m:
         try:
@@ -110,27 +141,36 @@ def _parse_llm_json(raw: str) -> dict | None:
 
 
 async def _call_llm(messages: list[dict]) -> str:
-    """Call OpenRouter with a single retry on RateLimitError.
-
-    TODO(phase-5-hardening): if transient 429s are frequent, consider using
-    OpenRouter's `models` parameter for automatic fallback to a secondary model
-    (e.g. models=[PRIMARY, FALLBACK]). This handles provider outages without
-    increasing latency on the happy path.
-    """
+    """Call GigaChat with a single retry on 429."""
     for attempt in range(2):
+        token = await _get_access_token()
         try:
-            resp = await client.chat.completions.create(
-                model=MODEL,
-                messages=messages,
-                temperature=0.3,
-            )
-            return resp.choices[0].message.content or ""
-        except RateLimitError:
-            if attempt == 0:
-                logger.warning("RateLimitError, retrying after 2 s")
-                await asyncio.sleep(2)
-                continue
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                resp = await client.post(
+                    _CHAT_URL,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json",
+                    },
+                    json={
+                        "model": MODEL,
+                        "messages": messages,
+                        "temperature": 0.3,
+                    },
+                )
+                if resp.status_code == 429:
+                    if attempt == 0:
+                        logger.warning("GigaChat 429, retrying after 2 s")
+                        await asyncio.sleep(2)
+                        continue
+                    resp.raise_for_status()
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"] or ""
+        except httpx.HTTPStatusError:
             raise
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -149,8 +189,7 @@ async def start_interview(topic: str, asked_questions: list[str]) -> StartResult
         )
         pool = QUESTIONS[topic]
     question = random.choice(pool)
-    pronounce_text = f"Вопрос: {question}"
-    return StartResult(first_question=question, pronounce_text=pronounce_text)
+    return StartResult(first_question=question, pronounce_text=f"Вопрос: {question}")
 
 
 async def evaluate_answer(
@@ -160,17 +199,7 @@ async def evaluate_answer(
     history: list[dict[str, str]],
     asked_questions: list[str],
 ) -> EvaluationResult:
-    """Evaluate a user's answer.
-
-    Args:
-        history: chat_history[checkpoint:] — contains the current question as
-                 the first {role:assistant} message, followed by any prior
-                 clarification turns for this question.
-        user_answer: the latest user message (not yet in history).
-
-    Returns EvaluationResult. Raises on LLM communication errors (caller
-    should catch and return action=ERROR).
-    """
+    """Evaluate a user's answer via GigaChat."""
     asked_str = ", ".join(asked_questions) if asked_questions else "нет"
     system = _SYSTEM_PROMPT.format(topic=topic, asked=asked_str)
 
@@ -180,12 +209,9 @@ async def evaluate_answer(
         {"role": "user", "content": user_answer},
     ]
 
-    # LLM call — may raise RateLimitError / TimeoutError / etc.
     raw = await _call_llm(messages)
-
     parsed = _parse_llm_json(raw)
 
-    # Step 3: one retry with strict prompt
     if parsed is None:
         retry_messages = messages + [
             {"role": "assistant", "content": raw},
@@ -197,7 +223,6 @@ async def evaluate_answer(
         except Exception as exc:
             logger.warning("Retry LLM call failed: %s", exc)
 
-    # Step 4: fallback
     if parsed is None:
         logger.warning("JSON parsing failed after retry, returning fallback")
         return _FALLBACK

@@ -9,10 +9,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from pathlib import Path
+
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import random
 
@@ -21,18 +23,17 @@ from llm_service import start_interview, evaluate_answer
 from questions import QUESTIONS
 
 
-class _RequestIdFilter(logging.Filter):
-    def filter(self, record):
+class _Fmt(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
         if not hasattr(record, "request_id"):
             record.request_id = "-"
-        return True
+        return super().format(record)
 
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] request_id=%(request_id)s %(message)s",
-)
-logging.getLogger().addFilter(_RequestIdFilter())
+_handler = logging.StreamHandler()
+_handler.setFormatter(_Fmt("%(asctime)s [%(levelname)s] request_id=%(request_id)s %(message)s"))
+logging.getLogger().setLevel(logging.INFO)
+logging.getLogger().addHandler(_handler)
 logger = logging.getLogger(__name__)
 
 
@@ -296,6 +297,30 @@ async def evaluate(request: Request) -> JSONResponse:
         "feedback": eval_result.feedback,
         "next_question": next_question,
         "question_index": new_question_index,
+        "final_scores": final_scores,
+    })
+
+
+@app.post("/finish")
+async def finish(request: Request) -> JSONResponse:
+    body = await request.json()
+    session_id: str = body["session_id"]
+
+    session = session_manager.get_or_create(session_id)
+    if not session.topic:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Session not started. Call /start first."},
+        )
+
+    final_session = session_manager.finalize_topic(session_id)
+    final_scores = _build_final_scores(final_session.final_scores, session.topic)
+
+    return JSONResponse(content={
+        "action": "TOPIC_COMPLETE",
+        "feedback": "Тема завершена.",
+        "next_question": None,
+        "question_index": session.question_index,
         "final_scores": final_scores,
     })
 

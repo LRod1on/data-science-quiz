@@ -5,10 +5,12 @@ import { TOPICS } from '../constants/topics';
 const TOPIC_LABELS = Object.fromEntries(TOPICS.map((t) => [t.key, t.label]));
 
 const Wrapper = styled.div`
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   padding: 48px;
+  padding-bottom: calc(48px + var(--bottom-inset, 0px));
+  box-sizing: border-box;
 `;
 
 const TopRow = styled.div`
@@ -30,10 +32,12 @@ const LoadingHint = styled.div`
 
 const QuestionArea = styled.div`
   flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 48px 0;
+  overflow-y: auto;
 `;
 
 const QuestionText = styled.p`
@@ -50,6 +54,28 @@ const PlaceholderText = styled.p`
   color: rgba(255, 255, 255, 0.35);
   text-align: center;
   margin: 0;
+`;
+
+const AnswerBuffer = styled.div`
+  margin-top: 24px;
+  padding: 16px 24px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 22px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.85);
+  max-width: 820px;
+  max-height: 280px;
+  overflow-y: auto;
+  text-align: left;
+`;
+
+const Hint = styled.div`
+  font-size: 20px;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+  max-width: 820px;
 `;
 
 const Bottom = styled.div`
@@ -87,7 +113,8 @@ const Button = styled.button`
   border-radius: 16px;
   color: #fff;
   font-size: 24px;
-  padding: 16px 40px;
+  padding: 16px 32px;
+  min-width: 300px;
   cursor: pointer;
   transition: background 0.15s;
 
@@ -116,37 +143,51 @@ export function InterviewView({
   topic,
   questionIndex,
   questionText,
+  answerBuffer,
   isLoading,
   isListening,
   lastError,
+  onSubmit,
   onNext,
-  onGiveUp,
+  onFinish,
 }) {
+  const hasBuffer = Boolean(answerBuffer && answerBuffer.trim());
   return (
     <Wrapper>
       <TopRow>
         <Badge>
-          {TOPIC_LABELS[topic]} &bull; {questionIndex + 1} / 5
+          {TOPIC_LABELS[topic]} &bull; {questionIndex} / 5
         </Badge>
         {isLoading && <LoadingHint>думаю...</LoadingHint>}
       </TopRow>
 
       <QuestionArea>
-        {questionText
-          ? <QuestionText>{questionText}</QuestionText>
-          : <PlaceholderText>Загружаю вопрос...</PlaceholderText>
-        }
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
+          {questionText
+            ? <QuestionText>{questionText}</QuestionText>
+            : <PlaceholderText>Загружаю вопрос...</PlaceholderText>
+          }
+          {hasBuffer && <AnswerBuffer>{answerBuffer}</AnswerBuffer>}
+        </div>
       </QuestionArea>
 
       <Bottom>
         {lastError && <ErrorBanner>{lastError}</ErrorBanner>}
+        <Hint>
+          {hasBuffer
+            ? 'Скажите «готово», когда закончите ответ. Можно добавить ещё.'
+            : 'Отвечайте по частям. Скажите «дай подумать», если нужна пауза, и «готово» — когда закончите.'}
+        </Hint>
         <MicDot $active={isListening} />
         <Buttons>
+          <Button onClick={onSubmit} disabled={isLoading || !hasBuffer}>
+            Готово
+          </Button>
           <Button onClick={onNext} disabled={isLoading}>
             Следующий
           </Button>
-          <Button onClick={onGiveUp} disabled={isLoading}>
-            Сдаюсь
+          <Button onClick={onFinish} disabled={isLoading}>
+            Закончить интервью
           </Button>
         </Buttons>
       </Bottom>

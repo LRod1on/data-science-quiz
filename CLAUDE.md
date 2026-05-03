@@ -85,3 +85,4 @@ App (state + assistant logic)
 - Не коммитить `.env`
 - `scenario-example.zip` переписывается в фазе 1 на новый набор action-ов
 - Распакованные .sc-файлы хранятся в `smartapp-backend/` (коммитим), zip-пересборка — только для загрузки в SmartApp Studio
+- Общаться с пользователем нужно на русском языке
