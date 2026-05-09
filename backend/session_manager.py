@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -35,8 +35,8 @@ class SessionState(BaseModel):
     # При переходе на следующий вопрос двигается вперёд, чтобы LLM не видела
     # историю предыдущих вопросов и не теряла фокус.
     history_checkpoint: int = 0
-    started_at: datetime = Field(default_factory=datetime.utcnow)
-    last_activity_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_activity_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class SessionManager:
@@ -58,7 +58,7 @@ class SessionManager:
     def update(self, session_id: str, **fields: Any) -> SessionState:
         """Обновить указанные поля сессии и вернуть новое состояние."""
         session = self.get_or_create(session_id)
-        updated = session.model_copy(update={**fields, "last_activity_at": datetime.utcnow()})
+        updated = session.model_copy(update={**fields, "last_activity_at": datetime.now(UTC)})
         self._sessions[session_id] = updated
         return updated
 
@@ -102,7 +102,7 @@ class SessionManager:
 
     def cleanup_stale(self, max_age_minutes: int = 60) -> int:
         """Удалить сессии без активности дольше max_age_minutes. Возвращает их количество."""
-        cutoff = datetime.utcnow() - timedelta(minutes=max_age_minutes)
+        cutoff = datetime.now(UTC) - timedelta(minutes=max_age_minutes)
         stale = [sid for sid, s in self._sessions.items() if s.last_activity_at < cutoff]
         for sid in stale:
             del self._sessions[sid]

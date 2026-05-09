@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -73,7 +73,7 @@ def test_cleanup_stale_removes_old_session(
     manager.get_or_create("fresh")
 
     # Руками искусственно состариваем сессию — обычно last_activity_at двигается через update().
-    old_time = datetime.utcnow() - timedelta(minutes=90)
+    old_time = datetime.now(UTC) - timedelta(minutes=90)
     manager._sessions["old"] = manager._sessions["old"].model_copy(
         update={"last_activity_at": old_time}
     )
