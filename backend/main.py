@@ -24,7 +24,12 @@ from fastapi.responses import JSONResponse
 # раньше следующих локальных импортов, поэтому E402 здесь подавлен намеренно.
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-from llm_service import evaluate_answer, score_from_history, start_interview  # noqa: E402
+from llm_service import (  # noqa: E402
+    EvaluationResult,
+    evaluate_answer,
+    score_from_history,
+    start_interview,
+)
 from logging_config import setup_logging  # noqa: E402
 from questions import QUESTIONS  # noqa: E402
 from schemas import (  # noqa: E402
@@ -35,7 +40,7 @@ from schemas import (  # noqa: E402
     StartRequest,
     StartResponse,
 )
-from session_manager import session_manager  # noqa: E402
+from session_manager import SessionState, session_manager  # noqa: E402
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -96,6 +101,66 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 
 _ALL_TOPICS = ["python", "classical_ml", "deep_learning", "nlp_cv"]
+
+
+def _advance_or_finalize(
+    session_id: str,
+    session: SessionState,
+    eval_result: EvaluationResult,
+    new_history: list[dict[str, str]],
+) -> tuple[str, str | None, dict[str, float | None] | None, int]:
+    """Записать балл за текущий вопрос и продвинуть сессию вперёд.
+
+    Возвращает (action, next_question, final_scores, new_question_index).
+    Если завершён пятый вопрос — финализирует тему. Иначе берёт следующий
+    вопрос (из ответа LLM или из локального банка) и сдвигает чекпоинт.
+    """
+    score = eval_result.score
+    if score is None:
+        logger.warning(
+            "score=null при is_question_complete=true (session=%s, q=%d), пишем 0",
+            session_id,
+            session.question_index,
+        )
+        score = 0.0
+    new_scores = [*session.per_question_scores, score]
+
+    if session.question_index >= 5:
+        # Пятый засчитанный вопрос — финализируем тему.
+        session_manager.update(session_id, per_question_scores=new_scores, chat_history=new_history)
+        final_session = session_manager.finalize_topic(session_id)
+        return (
+            "TOPIC_COMPLETE",
+            None,
+            _build_final_scores(final_session.final_scores, session.topic),
+            5,
+        )
+
+    # Двигаемся на следующий вопрос. Если LLM не прислала свой —
+    # берём из локального банка, чтобы интервью не зависло.
+    next_question = eval_result.next_question
+    if not next_question:
+        pool = [q for q in QUESTIONS[session.topic] if q not in session.asked_questions]
+        if not pool:
+            pool = QUESTIONS[session.topic]
+        next_question = random.choice(pool)
+
+    new_asked = [*session.asked_questions, next_question]
+    new_question_index = session.question_index + 1
+    # Чекпоинт двигаем сразу за завершённый ход — следующий вопрос
+    # будет оцениваться в чистом контексте.
+    checkpoint = len(new_history)
+    new_history_with_next = [*new_history, {"role": "assistant", "content": next_question}]
+    session_manager.update(
+        session_id,
+        per_question_scores=new_scores,
+        chat_history=new_history_with_next,
+        history_checkpoint=checkpoint,
+        current_question=next_question,
+        question_index=new_question_index,
+        asked_questions=new_asked,
+    )
+    return "NEXT_QUESTION", next_question, None, new_question_index
 
 
 def _build_final_scores(
@@ -241,57 +306,10 @@ async def evaluate(req: EvaluateRequest, request: Request) -> EvaluateResponse:
         # Остаёмся на том же вопросе — LLM попросила уточнение.
         action = "CONTINUE"
         session_manager.update(req.session_id, chat_history=new_history)
-
     else:
-        # Вопрос засчитан. Если LLM при этом прислала score=null
-        # (нарушение контракта в _SYSTEM_PROMPT) — пишем 0 и логируем,
-        # чтобы не падать и видеть факт нарушения в логах.
-        score = eval_result.score
-        if score is None:
-            logger.warning(
-                "score=null при is_question_complete=true (session=%s, q=%d), пишем 0",
-                req.session_id,
-                session.question_index,
-            )
-            score = 0.0
-        new_scores = [*session.per_question_scores, score]
-
-        if session.question_index >= 5:
-            # Пятый засчитанный вопрос — финализируем тему.
-            session_manager.update(
-                req.session_id, per_question_scores=new_scores, chat_history=new_history
-            )
-            final_session = session_manager.finalize_topic(req.session_id)
-            action = "TOPIC_COMPLETE"
-            new_question_index = 5
-            final_scores = _build_final_scores(final_session.final_scores, session.topic)
-
-        else:
-            # Двигаемся на следующий вопрос. Если LLM не прислала свой —
-            # берём из локального банка, чтобы интервью не зависло.
-            next_question = eval_result.next_question
-            if not next_question:
-                pool = [q for q in QUESTIONS[session.topic] if q not in session.asked_questions]
-                if not pool:
-                    pool = QUESTIONS[session.topic]
-                next_question = random.choice(pool)
-
-            new_asked = [*session.asked_questions, next_question]
-            new_question_index = session.question_index + 1
-            # Чекпоинт двигаем сразу за завершённый ход — следующий вопрос
-            # будет оцениваться в чистом контексте.
-            checkpoint = len(new_history)
-            new_history_with_next = [*new_history, {"role": "assistant", "content": next_question}]
-            session_manager.update(
-                req.session_id,
-                per_question_scores=new_scores,
-                chat_history=new_history_with_next,
-                history_checkpoint=checkpoint,
-                current_question=next_question,
-                question_index=new_question_index,
-                asked_questions=new_asked,
-            )
-            action = "NEXT_QUESTION"
+        action, next_question, final_scores, new_question_index = _advance_or_finalize(
+            req.session_id, session, eval_result, new_history
+        )
 
     logger.info(
         json.dumps(
