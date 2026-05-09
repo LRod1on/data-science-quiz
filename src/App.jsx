@@ -100,6 +100,20 @@ export class App extends React.Component {
     speak(this.assistant, speechText);
   }
 
+  // Общий код для async-обработчиков, дёргающих /evaluate, /skip, /finish:
+  // показать загрузку, вызвать API, применить ответ или показать ошибку.
+  // extraBefore нужен для случаев, когда вместе со стартом надо что-то сбросить
+  // в state (например, answerBuffer перед /skip и /finish).
+  async runApi(apiCall, extraBefore = {}) {
+    this.setState({ isLoading: true, lastError: null, ...extraBefore });
+    try {
+      const data = await apiCall();
+      this.applyEvaluateResponse(data);
+    } catch (err) {
+      this.setState({ isLoading: false, lastError: err.message });
+    }
+  }
+
   async handleStartInterview(topic) {
     if (this.state.isLoading || this.state.status !== 'welcome') return;
     this.setState({
@@ -134,42 +148,26 @@ export class App extends React.Component {
     }));
   }
 
-  async handleFinishAnswer() {
+  handleFinishAnswer() {
     if (this.state.status !== 'interview' || this.state.isLoading) return;
     const buffered = this.state.answerBuffer.trim();
     if (!buffered) {
       speak(this.assistant, 'Я не услышал ответ. Скажите его и затем «готово».');
       return;
     }
-    this.setState({ isLoading: true, lastError: null });
-    try {
-      const data = await evaluateAnswer(this.sessionId, buffered);
-      this.applyEvaluateResponse(data);
-    } catch (err) {
-      this.setState({ isLoading: false, lastError: err.message });
-    }
+    // Буфер сознательно НЕ чистим до ответа — если запрос упадёт, пользователь
+    // сможет повторить «готово» с тем же ответом.
+    return this.runApi(() => evaluateAnswer(this.sessionId, buffered));
   }
 
-  async handleNextQuestion() {
+  handleNextQuestion() {
     if (this.state.isLoading) return;
-    this.setState({ isLoading: true, lastError: null, answerBuffer: '' });
-    try {
-      const data = await skipQuestion(this.sessionId);
-      this.applyEvaluateResponse(data);
-    } catch (err) {
-      this.setState({ isLoading: false, lastError: err.message });
-    }
+    return this.runApi(() => skipQuestion(this.sessionId), { answerBuffer: '' });
   }
 
-  async handleFinishInterview() {
+  handleFinishInterview() {
     if (this.state.status !== 'interview' || this.state.isLoading) return;
-    this.setState({ isLoading: true, lastError: null, answerBuffer: '' });
-    try {
-      const data = await finishInterview(this.sessionId);
-      this.applyEvaluateResponse(data);
-    } catch (err) {
-      this.setState({ isLoading: false, lastError: err.message });
-    }
+    return this.runApi(() => finishInterview(this.sessionId), { answerBuffer: '' });
   }
 
   handleEndInterview() {
