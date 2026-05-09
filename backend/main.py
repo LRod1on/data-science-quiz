@@ -1,26 +1,25 @@
 import json
 import logging
+import os
+import random
 import time
 import traceback
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from pathlib import Path
-
-from dotenv import load_dotenv
-import os
-
+# llm_service читает GIGACHAT_* переменные на импорте — load_dotenv должен
+# выполниться до этих локальных импортов, поэтому E402 здесь подавлен намеренно.
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
-import random
-
-from session_manager import session_manager
-from llm_service import start_interview, evaluate_answer, score_from_history
-from questions import QUESTIONS
+from llm_service import evaluate_answer, score_from_history, start_interview  # noqa: E402
+from questions import QUESTIONS  # noqa: E402
+from session_manager import session_manager  # noqa: E402
 
 
 class _Fmt(logging.Formatter):
@@ -47,9 +46,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Interview Trainer API", lifespan=lifespan)
 
 _cors_origins: list[str] = [
-    o.strip()
-    for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
-    if o.strip()
+    o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()
 ]
 
 app.add_middleware(
@@ -66,7 +63,9 @@ async def attach_request_id(request: Request, call_next):
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
     logger.info(
-        "Incoming %s %s", request.method, request.url.path,
+        "Incoming %s %s",
+        request.method,
+        request.url.path,
         extra={"request_id": request_id},
     )
     response = await call_next(request)
@@ -173,7 +172,7 @@ async def evaluate(request: Request) -> JSONResponse:
         )
 
     # Slice history to current question context only
-    current_history = session.chat_history[session.history_checkpoint:]
+    current_history = session.chat_history[session.history_checkpoint :]
 
     t0 = time.monotonic()
     try:
@@ -187,29 +186,34 @@ async def evaluate(request: Request) -> JSONResponse:
     except Exception as exc:
         llm_latency_ms = int((time.monotonic() - t0) * 1000)
         logger.error(
-            "LLM error in /evaluate: %s", exc,
+            "LLM error in /evaluate: %s",
+            exc,
             extra={"request_id": request_id},
         )
         logger.info(
-            json.dumps({
-                "event": "evaluate",
-                "session_id": session_id,
-                "topic": session.topic,
-                "question_index": session.question_index,
-                "user_text": user_text[:100],
-                "llm_latency_ms": llm_latency_ms,
-                "score": None,
-                "action": "ERROR",
-            }),
+            json.dumps(
+                {
+                    "event": "evaluate",
+                    "session_id": session_id,
+                    "topic": session.topic,
+                    "question_index": session.question_index,
+                    "user_text": user_text[:100],
+                    "llm_latency_ms": llm_latency_ms,
+                    "score": None,
+                    "action": "ERROR",
+                }
+            ),
             extra={"request_id": request_id},
         )
-        return JSONResponse(content={
-            "action": "ERROR",
-            "feedback": "Произошла ошибка при обработке ответа, попробуй ещё раз.",
-            "next_question": None,
-            "question_index": session.question_index,
-            "final_scores": None,
-        })
+        return JSONResponse(
+            content={
+                "action": "ERROR",
+                "feedback": "Произошла ошибка при обработке ответа, попробуй ещё раз.",
+                "next_question": None,
+                "question_index": session.question_index,
+                "final_scores": None,
+            }
+        )
 
     llm_latency_ms = int((time.monotonic() - t0) * 1000)
 
@@ -219,7 +223,8 @@ async def evaluate(request: Request) -> JSONResponse:
         if not eval_result.is_question_complete
         else eval_result.feedback
     )
-    new_history = session.chat_history + [
+    new_history = [
+        *session.chat_history,
         {"role": "user", "content": user_text},
         {"role": "assistant", "content": assistant_content or ""},
     ]
@@ -244,11 +249,13 @@ async def evaluate(request: Request) -> JSONResponse:
                 session.question_index,
             )
             score = 0.0
-        new_scores = session.per_question_scores + [score]
+        new_scores = [*session.per_question_scores, score]
 
         if session.question_index >= 5:
             # All 5 questions done — finalize topic
-            session_manager.update(session_id, per_question_scores=new_scores, chat_history=new_history)
+            session_manager.update(
+                session_id, per_question_scores=new_scores, chat_history=new_history
+            )
             final_session = session_manager.finalize_topic(session_id)
             action = "TOPIC_COMPLETE"
             new_question_index = 5
@@ -264,13 +271,11 @@ async def evaluate(request: Request) -> JSONResponse:
                     pool = QUESTIONS[session.topic]
                 next_question = random.choice(pool)
 
-            new_asked = session.asked_questions + [next_question]
+            new_asked = [*session.asked_questions, next_question]
             new_question_index = session.question_index + 1
             # Checkpoint: after current turn, before next question
             checkpoint = len(new_history)
-            new_history_with_next = new_history + [
-                {"role": "assistant", "content": next_question}
-            ]
+            new_history_with_next = [*new_history, {"role": "assistant", "content": next_question}]
             session_manager.update(
                 session_id,
                 per_question_scores=new_scores,
@@ -283,26 +288,30 @@ async def evaluate(request: Request) -> JSONResponse:
             action = "NEXT_QUESTION"
 
     logger.info(
-        json.dumps({
-            "event": "evaluate",
-            "session_id": session_id,
-            "topic": session.topic,
-            "question_index": session.question_index,
-            "user_text": user_text[:100],
-            "llm_latency_ms": llm_latency_ms,
-            "score": eval_result.score,
-            "action": action,
-        }),
+        json.dumps(
+            {
+                "event": "evaluate",
+                "session_id": session_id,
+                "topic": session.topic,
+                "question_index": session.question_index,
+                "user_text": user_text[:100],
+                "llm_latency_ms": llm_latency_ms,
+                "score": eval_result.score,
+                "action": action,
+            }
+        ),
         extra={"request_id": request_id},
     )
 
-    return JSONResponse(content={
-        "action": action,
-        "feedback": eval_result.feedback,
-        "next_question": next_question,
-        "question_index": new_question_index,
-        "final_scores": final_scores,
-    })
+    return JSONResponse(
+        content={
+            "action": action,
+            "feedback": eval_result.feedback,
+            "next_question": next_question,
+            "question_index": new_question_index,
+            "final_scores": final_scores,
+        }
+    )
 
 
 @app.post("/finish")
@@ -318,20 +327,22 @@ async def finish(request: Request) -> JSONResponse:
         )
 
     # Score whatever the candidate said on the current question before finalizing
-    current_history = session.chat_history[session.history_checkpoint:]
+    current_history = session.chat_history[session.history_checkpoint :]
     score = await score_from_history(session.topic, session.current_question or "", current_history)
-    session_manager.update(session_id, per_question_scores=session.per_question_scores + [score])
+    session_manager.update(session_id, per_question_scores=[*session.per_question_scores, score])
 
     final_session = session_manager.finalize_topic(session_id)
     final_scores = _build_final_scores(final_session.final_scores, session.topic)
 
-    return JSONResponse(content={
-        "action": "TOPIC_COMPLETE",
-        "feedback": "Тема завершена.",
-        "next_question": None,
-        "question_index": session.question_index,
-        "final_scores": final_scores,
-    })
+    return JSONResponse(
+        content={
+            "action": "TOPIC_COMPLETE",
+            "feedback": "Тема завершена.",
+            "next_question": None,
+            "question_index": session.question_index,
+            "final_scores": final_scores,
+        }
+    )
 
 
 @app.post("/skip")
@@ -347,9 +358,9 @@ async def skip(request: Request) -> JSONResponse:
         )
 
     # Score whatever was said on the current question before skipping
-    current_history = session.chat_history[session.history_checkpoint:]
+    current_history = session.chat_history[session.history_checkpoint :]
     score = await score_from_history(session.topic, session.current_question or "", current_history)
-    new_scores = session.per_question_scores + [score]
+    new_scores = [*session.per_question_scores, score]
 
     # Add skipped question to asked_questions so it won't be repeated
     new_asked = list(session.asked_questions)
@@ -360,16 +371,20 @@ async def skip(request: Request) -> JSONResponse:
 
     if new_index > 5:
         # Skipped the last question — finalize with the just-scored question
-        session_manager.update(session_id, asked_questions=new_asked, per_question_scores=new_scores)
+        session_manager.update(
+            session_id, asked_questions=new_asked, per_question_scores=new_scores
+        )
         final_session = session_manager.finalize_topic(session_id)
         final_scores = _build_final_scores(final_session.final_scores, session.topic)
-        return JSONResponse(content={
-            "action": "TOPIC_COMPLETE",
-            "feedback": "Тема завершена.",
-            "next_question": None,
-            "question_index": 5,
-            "final_scores": final_scores,
-        })
+        return JSONResponse(
+            content={
+                "action": "TOPIC_COMPLETE",
+                "feedback": "Тема завершена.",
+                "next_question": None,
+                "question_index": 5,
+                "final_scores": final_scores,
+            }
+        )
 
     # Pick next question from bank (not from LLM)
     result = await start_interview(topic=session.topic, asked_questions=new_asked)
@@ -378,9 +393,7 @@ async def skip(request: Request) -> JSONResponse:
 
     # Move the history checkpoint to the end of current history (drop skipped Q context)
     checkpoint = len(session.chat_history)
-    new_history = session.chat_history + [
-        {"role": "assistant", "content": next_question}
-    ]
+    new_history = [*session.chat_history, {"role": "assistant", "content": next_question}]
 
     session_manager.update(
         session_id,
@@ -392,10 +405,12 @@ async def skip(request: Request) -> JSONResponse:
         per_question_scores=new_scores,
     )
 
-    return JSONResponse(content={
-        "action": "NEXT_QUESTION",
-        "feedback": "Вопрос пропущен.",
-        "next_question": next_question,
-        "question_index": new_index,
-        "final_scores": None,
-    })
+    return JSONResponse(
+        content={
+            "action": "NEXT_QUESTION",
+            "feedback": "Вопрос пропущен.",
+            "next_question": next_question,
+            "question_index": new_index,
+            "final_scores": None,
+        }
+    )

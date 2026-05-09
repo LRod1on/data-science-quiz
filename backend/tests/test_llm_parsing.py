@@ -1,4 +1,5 @@
 """Tests for LLM JSON parsing logic in llm_service."""
+
 from __future__ import annotations
 
 import json
@@ -7,12 +8,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from llm_service import (
-    EvaluationResult,
     _FALLBACK,
+    EvaluationResult,
     _parse_llm_json,
     evaluate_answer,
 )
-
 
 # ---------------------------------------------------------------------------
 # _parse_llm_json unit tests
@@ -68,23 +68,27 @@ def test_parse_partial_json_returns_none():
 # evaluate_answer integration (LLM mocked via _call_llm)
 # ---------------------------------------------------------------------------
 
-VALID_RESPONSE = json.dumps({
-    "score": 8.5,
-    "feedback": "Хороший ответ, но не упомянул GIL.",
-    "is_question_complete": True,
-    "next_question": "Как работает __slots__?",
-    "clarifying_question": None,
-})
+VALID_RESPONSE = json.dumps(
+    {
+        "score": 8.5,
+        "feedback": "Хороший ответ, но не упомянул GIL.",
+        "is_question_complete": True,
+        "next_question": "Как работает __slots__?",
+        "clarifying_question": None,
+    }
+)
 
 MARKDOWN_RESPONSE = f"```json\n{VALID_RESPONSE}\n```"
 
-CLARIFY_RESPONSE = json.dumps({
-    "score": None,
-    "feedback": "Ответ неполный.",
-    "is_question_complete": False,
-    "next_question": None,
-    "clarifying_question": "Можешь описать поподробнее?",
-})
+CLARIFY_RESPONSE = json.dumps(
+    {
+        "score": None,
+        "feedback": "Ответ неполный.",
+        "is_question_complete": False,
+        "next_question": None,
+        "clarifying_question": "Можешь описать поподробнее?",
+    }
+)
 
 
 @pytest.fixture()
@@ -148,6 +152,8 @@ async def test_evaluate_garbage_both_calls_returns_fallback(base_args):
 async def test_evaluate_llm_exception_propagates(base_args):
     """LLM communication errors propagate so the route can return action=ERROR."""
     exc = RuntimeError("simulated LLM connection error")
-    with patch("llm_service._call_llm", new=AsyncMock(side_effect=[exc, exc])):
-        with pytest.raises(RuntimeError):
-            await evaluate_answer(**base_args)
+    with (
+        patch("llm_service._call_llm", new=AsyncMock(side_effect=[exc, exc])),
+        pytest.raises(RuntimeError),
+    ):
+        await evaluate_answer(**base_args)

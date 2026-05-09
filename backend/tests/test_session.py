@@ -76,7 +76,9 @@ def test_finalize_topic_no_scores_preserves_final_scores(manager: SessionManager
 # ---------------------------------------------------------------------------
 
 
-def test_cleanup_stale_removes_old_session(manager: SessionManager, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cleanup_stale_removes_old_session(
+    manager: SessionManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
     manager.get_or_create("old")
     manager.get_or_create("fresh")
 

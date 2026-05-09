@@ -3,6 +3,7 @@
 llm_service functions are mocked — these tests verify route logic and session
 state transitions, not LLM behavior.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
@@ -12,7 +13,6 @@ from fastapi.testclient import TestClient
 
 from llm_service import EvaluationResult, StartResult
 from session_manager import SessionManager
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -54,6 +54,7 @@ def fresh_session_manager():
 @pytest.fixture()
 def client():
     from main import app
+
     return TestClient(app)
 
 
@@ -118,7 +119,9 @@ def test_evaluate_continue(client, fresh_session_manager):
         asked_questions=["What is the GIL?"],
     )
     with patch("main.evaluate_answer", new=AsyncMock(return_value=EVAL_CLARIFY)):
-        resp = client.post("/evaluate", json={"session_id": SESSION_ID, "text": "I think it's a lock"})
+        resp = client.post(
+            "/evaluate", json={"session_id": SESSION_ID, "text": "I think it's a lock"}
+        )
     assert resp.status_code == 200
     data = resp.json()
     assert data["action"] == "CONTINUE"
@@ -340,7 +343,10 @@ def test_skip_updates_history_checkpoint(client, fresh_session_manager):
     session = fresh_session_manager.get_or_create(SESSION_ID)
     # Checkpoint must be at the start of Q2 (index 3 = end of old history)
     assert session.history_checkpoint == 3
-    assert session.chat_history[session.history_checkpoint] == {"role": "assistant", "content": "Q2"}
+    assert session.chat_history[session.history_checkpoint] == {
+        "role": "assistant",
+        "content": "Q2",
+    }
 
 
 def test_skip_last_question_returns_topic_complete(client, fresh_session_manager):

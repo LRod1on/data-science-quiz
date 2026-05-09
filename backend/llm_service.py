@@ -92,8 +92,7 @@ _SYSTEM_PROMPT = """\
 "clarifying_question": "<уточняющий вопрос или null>"}}"""
 
 _RETRY_PROMPT = (
-    "Верни ТОЛЬКО валидный JSON без markdown и без пояснений. "
-    "Ничего кроме JSON-объекта."
+    "Верни ТОЛЬКО валидный JSON без markdown и без пояснений. Ничего кроме JSON-объекта."
 )
 
 _SCORE_FROM_HISTORY_PROMPT = """\
@@ -224,7 +223,8 @@ async def evaluate_answer(
     parsed = _parse_llm_json(raw)
 
     if parsed is None:
-        retry_messages = messages + [
+        retry_messages = [
+            *messages,
             {"role": "assistant", "content": raw},
             {"role": "user", "content": _RETRY_PROMPT},
         ]
