@@ -258,31 +258,42 @@ yarn start    # запустить dev-сервер на localhost:3000
 
 ```
 .
-├── src/                        # React-приложение (CRA)
-│   ├── App.jsx                 # Корневой компонент: состояние + ассистент
-│   ├── api/interviewApi.js     # Вызовы FastAPI-бэкенда
+├── src/                            # React-приложение (CRA)
+│   ├── App.jsx                     # Корневой компонент: state и интеграция с Салютом
+│   ├── api/interviewApi.js         # Вызовы FastAPI-бэкенда
+│   ├── services/
+│   │   ├── assistant.js            # Обёртка над @salutejs/client (createAssistant + speak)
+│   │   └── evaluationDispatch.js   # Декодер ответа /evaluate в setState-патч
+│   ├── components/ErrorBoundary.jsx
+│   ├── constants/topics.js         # Темы интервью (ключи синхронизированы с бэком)
 │   └── views/
-│       ├── WelcomeView.jsx     # Экран выбора темы
-│       ├── InterviewView.jsx   # Экран вопроса и ответа
-│       └── ResultView.jsx      # Радар-чарт результатов
+│       ├── WelcomeView.jsx         # Экран выбора темы
+│       ├── InterviewView.jsx       # Экран вопроса и ответа
+│       └── ResultView.jsx          # Радар-чарт результатов
 │
-├── backend/                    # FastAPI-бэкенд
-│   ├── main.py                 # Маршруты и middleware
-│   ├── llm_service.py          # Интеграция с GigaChat
-│   ├── session_manager.py      # In-memory хранилище сессий
-│   ├── questions.py            # Банк вопросов по темам
-│   └── requirements.txt
+├── backend/                        # FastAPI-бэкенд
+│   ├── main.py                     # Маршруты и middleware
+│   ├── schemas.py                  # Pydantic-модели запросов/ответов
+│   ├── llm_service.py              # Интеграция с GigaChat
+│   ├── session_manager.py          # In-memory хранилище сессий
+│   ├── logging_config.py           # Настройка логирования
+│   ├── questions.py                # Банк вопросов по темам
+│   ├── pyproject.toml              # Конфиг ruff (форматтер + линтер)
+│   ├── requirements.txt
+│   └── tests/                      # pytest: маршруты, сессии, парсинг LLM
 │
-├── smartapp-backend/           # .sc-сценарии для SmartApp Code
+├── smartapp-backend/               # .sc-сценарии для SmartApp Code
 │   └── src/
-│       ├── entryPoint.sc       # Точка входа
-│       ├── sc/interview.sc     # Сценарий интервью
-│       └── js/actions.js       # JS-хелперы сценариев
+│       ├── entryPoint.sc           # Точка входа
+│       ├── sc/interview.sc         # Сценарий интервью
+│       └── js/actions.js           # JS-хелперы сценариев
 │
-├── scenario-new.zip            # Архив для загрузки в SmartApp Studio
-├── .env.sample                 # Шаблон переменных фронта (REACT_APP_*)
-├── backend/.env.example        # Шаблон переменных бэка (GIGACHAT_*, CORS_ORIGINS)
-└── CLAUDE.md                   # Инструкции для Claude Code
+├── docs/superpowers/               # Спеки и планы итераций проекта
+├── scenario-new.zip                # Архив для загрузки в SmartApp Studio
+├── .editorconfig                   # Общие правила отступов для IDE
+├── .env.sample                     # Шаблон переменных фронта (REACT_APP_*)
+├── backend/.env.example            # Шаблон переменных бэка (GIGACHAT_*, CORS_ORIGINS)
+└── CLAUDE.md                       # Инструкции для Claude Code
 ```
 
 ---
