@@ -81,6 +81,8 @@ const RestartButton = styled.button`
   }
 `;
 
+// Конфиг chart.js: радар 0..10, без анимации (на TV-экранах SberBox
+// она тормозит), цвета подобраны под тёмную тему приложения.
 const CHART_OPTIONS = {
   responsive: true,
   maintainAspectRatio: false,

@@ -1,3 +1,5 @@
+// Темы интервью. Ключи (key) синхронизированы с backend/questions.py
+// и со значениями action.topic в .sc-сценариях Салюта.
 export const TOPICS = [
   {
     key: 'python',

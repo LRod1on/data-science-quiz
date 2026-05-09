@@ -38,10 +38,10 @@ export class App extends React.Component {
 
     this.state = {
       status: 'welcome',       // 'welcome' | 'interview' | 'results'
-      currentTopic: null,      // 'python' | 'classical_ml' | 'deep_learning' | 'nlp_cv'
-      questionIndex: 0,        // 0-based
+      currentTopic: null,      // ключ темы из constants/topics или null на welcome
+      questionIndex: 0,        // 1..5 во время интервью, 0 на welcome
       questionText: '',
-      answerBuffer: '',        // accumulated user fragments until FINISH_ANSWER
+      answerBuffer: '',        // фрагменты речи, склеенные пробелами; чистится при FINISH_ANSWER
       isLoading: false,
       radarScores: {
         python: null,
@@ -161,7 +161,7 @@ export class App extends React.Component {
     }
 
     if (action === 'CONTINUE') {
-      // LLM asked a clarifying question — feedback IS the clarifying question
+      // LLM попросила уточнить — feedback и есть текст уточняющего вопроса.
       this.setState({
         questionText: feedback,
         isLoading: false,
@@ -172,7 +172,8 @@ export class App extends React.Component {
       return;
     }
 
-    // ERROR or unknown action — keep the buffer so the user can retry "готово"
+    // ERROR или неизвестный action — буфер не чистим, чтобы пользователь
+    // мог повторить «готово» с тем же ответом.
     this.setState({ isLoading: false, lastError: feedback || 'Ошибка сервера' });
     this._speakText(feedback);
   }
@@ -199,8 +200,9 @@ export class App extends React.Component {
 
   handleUserAnswer(text) {
     if (this.state.status !== 'interview' || this.state.isLoading) return;
-    // Guard against the createSmartappDebugger initPhrase arriving late and being
-    // misrouted to USER_ANSWER. Launch phrases start with "запусти/открой/вруби".
+    // Защита: initPhrase из createSmartappDebugger иногда прилетает с задержкой
+    // и попадает в USER_ANSWER. Команды запуска начинаются с «запусти/открой/вруби» —
+    // фильтруем их, чтобы они не попали в буфер ответа.
     if (/^(запусти|открой|вруби)\s/i.test(text)) return;
     const fragment = (text || '').trim();
     if (!fragment) return;
