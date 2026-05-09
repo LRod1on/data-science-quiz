@@ -25,25 +25,11 @@ from fastapi.responses import JSONResponse
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from llm_service import evaluate_answer, score_from_history, start_interview  # noqa: E402
+from logging_config import setup_logging  # noqa: E402
 from questions import QUESTIONS  # noqa: E402
 from session_manager import session_manager  # noqa: E402
 
-
-class _RequestIdFormatter(logging.Formatter):
-    """Подставляет '-' вместо отсутствующего request_id, чтобы строка лога не падала."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        if not hasattr(record, "request_id"):
-            record.request_id = "-"
-        return super().format(record)
-
-
-_handler = logging.StreamHandler()
-_handler.setFormatter(
-    _RequestIdFormatter("%(asctime)s [%(levelname)s] request_id=%(request_id)s %(message)s")
-)
-logging.getLogger().setLevel(logging.INFO)
-logging.getLogger().addHandler(_handler)
+setup_logging()
 logger = logging.getLogger(__name__)
 
 
