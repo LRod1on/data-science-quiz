@@ -33,7 +33,6 @@ const initializeAssistant = (getState) => {
 export class App extends React.Component {
   constructor(props) {
     super(props);
-    console.log('constructor');
 
     this.sessionId = crypto.randomUUID();
 
@@ -56,37 +55,20 @@ export class App extends React.Component {
     this.assistant = initializeAssistant(() => this.getStateForAssistant());
 
     this.assistant.on('data', (event) => {
-      console.log('assistant.on(data)', event);
-      if (event.type === 'character') {
-        console.log(`assistant.on(data): character: "${event?.character?.id}"`);
-      } else if (event.type === 'insets' || event.type === 'dynamic_insets') {
+      if (event.type === 'character' || event.type === 'tts') {
+        return;
+      }
+      if (event.type === 'insets' || event.type === 'dynamic_insets') {
         const bottom = event?.insets?.bottom ?? 0;
         document.documentElement.style.setProperty('--bottom-inset', `${bottom}px`);
-      } else {
-        const { action } = event;
-        this.dispatchAssistantAction(action);
+        return;
       }
-    });
-
-    this.assistant.on('start', (event) => {
-      console.log('assistant.on(start)', event, this.assistant.getInitialData());
-    });
-
-    this.assistant.on('command', (event) => {
-      console.log('assistant.on(command)', event);
+      this.dispatchAssistantAction(event.action);
     });
 
     this.assistant.on('error', (event) => {
-      console.log('assistant.on(error)', event);
+      console.warn('assistant error:', event);
     });
-
-    this.assistant.on('tts', (event) => {
-      console.log('assistant.on(tts)', event);
-    });
-  }
-
-  componentDidMount() {
-    console.log('componentDidMount');
   }
 
   getStateForAssistant() {
@@ -107,7 +89,6 @@ export class App extends React.Component {
   }
 
   dispatchAssistantAction(action) {
-    console.log('dispatchAssistantAction', action);
     if (!action) return;
     switch (action.type) {
       case 'START_INTERVIEW':
@@ -140,13 +121,12 @@ export class App extends React.Component {
     try {
       const unsubscribe = this.assistant.sendData(
         { action: { action_id: 'SPEAK' }, eventData: { text } },
-        (data) => {
-          console.log('sendData SPEAK ack:', data);
+        () => {
           if (typeof unsubscribe === 'function') unsubscribe();
         }
       );
     } catch (err) {
-      console.warn('_speakText sendData error:', err);
+      console.warn('assistant.sendData(SPEAK) failed:', err);
     }
   }
 
@@ -290,7 +270,6 @@ export class App extends React.Component {
   }
 
   render() {
-    console.log('render');
     const {
       status,
       currentTopic,
