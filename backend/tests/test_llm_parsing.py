@@ -1,4 +1,8 @@
-"""Tests for LLM JSON parsing logic in llm_service."""
+"""Тесты парсинга JSON-ответов LLM и общей логики evaluate_answer.
+
+Сетевой слой замокан через _call_llm — здесь проверяется только то,
+что мы корректно вытаскиваем JSON и валидируем его в EvaluationResult.
+"""
 
 from __future__ import annotations
 
@@ -13,10 +17,6 @@ from llm_service import (
     _parse_llm_json,
     evaluate_answer,
 )
-
-# ---------------------------------------------------------------------------
-# _parse_llm_json unit tests
-# ---------------------------------------------------------------------------
 
 
 def test_parse_valid_json():
@@ -63,10 +63,6 @@ def test_parse_partial_json_returns_none():
     result = _parse_llm_json('{"score": 8, "feedback":')
     assert result is None
 
-
-# ---------------------------------------------------------------------------
-# evaluate_answer integration (LLM mocked via _call_llm)
-# ---------------------------------------------------------------------------
 
 VALID_RESPONSE = json.dumps(
     {
@@ -131,7 +127,7 @@ async def test_evaluate_clarification_response(base_args):
 
 @pytest.mark.asyncio
 async def test_evaluate_garbage_first_retry_valid(base_args):
-    """First call returns garbage; retry returns valid JSON."""
+    """Первый вызов возвращает мусор, ретрай — валидный JSON; результат — из ретрая."""
     call_results = iter(["not json at all", VALID_RESPONSE])
     with patch("llm_service._call_llm", new=AsyncMock(side_effect=call_results)):
         result = await evaluate_answer(**base_args)
@@ -140,7 +136,7 @@ async def test_evaluate_garbage_first_retry_valid(base_args):
 
 @pytest.mark.asyncio
 async def test_evaluate_garbage_both_calls_returns_fallback(base_args):
-    """Both calls return garbage — should return _FALLBACK."""
+    """И первый вызов, и ретрай — мусор: возвращаем _FALLBACK, не падаем."""
     with patch("llm_service._call_llm", new=AsyncMock(return_value="not json")):
         result = await evaluate_answer(**base_args)
     assert result.score is None
@@ -150,7 +146,7 @@ async def test_evaluate_garbage_both_calls_returns_fallback(base_args):
 
 @pytest.mark.asyncio
 async def test_evaluate_llm_exception_propagates(base_args):
-    """LLM communication errors propagate so the route can return action=ERROR."""
+    """Сетевые ошибки LLM пробрасываются — /evaluate сам поймает их и вернёт action=ERROR."""
     exc = RuntimeError("simulated LLM connection error")
     with (
         patch("llm_service._call_llm", new=AsyncMock(side_effect=[exc, exc])),

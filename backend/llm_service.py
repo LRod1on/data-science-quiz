@@ -1,4 +1,8 @@
-"""LLM service: question selection and answer evaluation via GigaChat."""
+"""Слой работы с LLM: выбор вопросов и оценка ответов через GigaChat.
+
+Здесь же живёт токен-кеш и парсер ответа модели — у GigaChat нет structured
+output, поэтому JSON приходит текстом и его приходится извлекать вручную.
+"""
 
 from __future__ import annotations
 
@@ -19,34 +23,32 @@ from questions import QUESTIONS
 
 logger = logging.getLogger(__name__)
 
-# Suppress SSL warning — Sber uses a Russian CA not in Python's default bundle
+# GigaChat использует российский CA, которого нет в дефолтном bundle Python.
+# Отключаем проверку SSL и одновременно глушим предупреждение httpx —
+# иначе на каждый запрос к GigaChat в логах будет шум.
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
 
 _AUTH_KEY = os.getenv("GIGACHAT_AUTH_KEY", "")
 if not _AUTH_KEY:
-    logger.warning("GIGACHAT_AUTH_KEY is not set")
+    logger.warning("GIGACHAT_AUTH_KEY не задан")
 
 MODEL = os.getenv("GIGACHAT_MODEL", "GigaChat")
 
 _TOKEN_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 _CHAT_URL = "https://gigachat.devices.sberbank.ru/api/v1/chat/completions"
 
-# ---------------------------------------------------------------------------
-# Token cache (module-level, refreshed on expiry)
-# ---------------------------------------------------------------------------
-
+# Кеш access-токена: модульная переменная, обновляется по истечении срока.
+# Lock — потому что несколько корутин могут параллельно дёрнуть refresh.
 _access_token: str = ""
 _token_expires_at: float = 0.0
 _token_lock = asyncio.Lock()
 
 
 async def _get_access_token() -> str:
+    """Вернуть валидный access-токен GigaChat, обновив его при необходимости."""
     global _access_token, _token_expires_at
     async with _token_lock:
+        # Запас 60 секунд — чтобы не словить просрочку прямо во время запроса.
         if _access_token and time.time() < _token_expires_at - 60:
             return _access_token
 
@@ -65,14 +67,10 @@ async def _get_access_token() -> str:
             data = resp.json()
 
         _access_token = data["access_token"]
-        _token_expires_at = data["expires_at"] / 1000  # ms → s
-        logger.debug("GigaChat token refreshed, expires in ~30 min")
+        _token_expires_at = data["expires_at"] / 1000  # API отдаёт миллисекунды
+        logger.debug("Токен GigaChat обновлён, действителен ~30 минут")
         return _access_token
 
-
-# ---------------------------------------------------------------------------
-# Prompts
-# ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
 Ты Senior Data Scientist, проводишь техническое интервью по теме {topic}.
@@ -103,12 +101,16 @@ _SCORE_FROM_HISTORY_PROMPT = """\
 Если кандидат не дал содержательного ответа или сдался — ставь низкую оценку.
 Верни ТОЛЬКО число от 0 до 10 (можно дробное, например 6.5). Без пояснений, без текста."""
 
-# ---------------------------------------------------------------------------
-# Result models
-# ---------------------------------------------------------------------------
-
 
 class EvaluationResult(BaseModel):
+    """Результат оценки одного хода в диалоге.
+
+    Если is_question_complete=False — LLM хочет уточнения, score=null,
+    clarifying_question содержит сам уточняющий вопрос. Иначе — вопрос засчитан,
+    score обязан быть числом 0..10, а next_question может быть None (тогда
+    следующий вопрос берётся из локального банка).
+    """
+
     score: float | None
     feedback: str
     is_question_complete: bool
@@ -117,10 +119,14 @@ class EvaluationResult(BaseModel):
 
 
 class StartResult(BaseModel):
+    """Первый вопрос темы и его озвучиваемая форма."""
+
     first_question: str
     pronounce_text: str
 
 
+# Возвращается, если LLM сломалась настолько, что даже после ретрая JSON не парсится.
+# Просим повторить ответ — для пользователя это выглядит как обычное уточнение.
 _FALLBACK = EvaluationResult(
     score=None,
     feedback="Извини, я не расслышал, повтори ответ.",
@@ -129,12 +135,14 @@ _FALLBACK = EvaluationResult(
     clarifying_question="Можешь переформулировать?",
 )
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
 
 def _parse_llm_json(raw: str) -> dict | None:
+    """Распарсить JSON из ответа LLM.
+
+    Сначала пробуем как есть, потом достаём первую JSON-фигуру regex'ом —
+    это покрывает случаи markdown-обрамления и сопутствующего текста,
+    которые модель иногда подмешивает несмотря на инструкции в промпте.
+    """
     try:
         return json.loads(raw)
     except (json.JSONDecodeError, ValueError):
@@ -151,7 +159,7 @@ def _parse_llm_json(raw: str) -> dict | None:
 
 
 async def _call_llm(messages: list[dict]) -> str:
-    """Call GigaChat with a single retry on 429."""
+    """Вызвать GigaChat с одним ретраем на 429 (rate limit)."""
     for attempt in range(2):
         token = await _get_access_token()
         try:
@@ -171,7 +179,7 @@ async def _call_llm(messages: list[dict]) -> str:
                 )
                 if resp.status_code == 429:
                     if attempt == 0:
-                        logger.warning("GigaChat 429, retrying after 2 s")
+                        logger.warning("GigaChat вернул 429, повторяем через 2 секунды")
                         await asyncio.sleep(2)
                         continue
                     resp.raise_for_status()
@@ -183,17 +191,16 @@ async def _call_llm(messages: list[dict]) -> str:
     return ""
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 async def start_interview(topic: str, asked_questions: list[str]) -> StartResult:
-    """Pick a random question from the bank, excluding already-asked questions."""
+    """Выбрать случайный вопрос из банка, исключив уже заданные.
+
+    Если все 15 вопросов уже задавали в рамках сессии — берём из полного банка
+    с повтором (чтобы /skip продолжал работать), но логируем warning.
+    """
     pool = [q for q in QUESTIONS[topic] if q not in asked_questions]
     if not pool:
         logger.warning(
-            "Question bank for topic '%s' exhausted (%d asked), reusing full bank",
+            "Банк вопросов по теме '%s' исчерпан (%d задано), переиспользуем полный список",
             topic,
             len(asked_questions),
         )
@@ -209,7 +216,12 @@ async def evaluate_answer(
     history: list[dict[str, str]],
     asked_questions: list[str],
 ) -> EvaluationResult:
-    """Evaluate a user's answer via GigaChat."""
+    """Оценить ответ пользователя через GigaChat.
+
+    Если первый ответ модели не парсится — делаем один ретрай с напоминанием
+    про чистый JSON. Если и после этого мусор — возвращаем _FALLBACK, чтобы
+    интервью не падало, а просто попросило повторить ответ.
+    """
     asked_str = ", ".join(asked_questions) if asked_questions else "нет"
     system = _SYSTEM_PROMPT.format(topic=topic, asked=asked_str)
 
@@ -232,16 +244,16 @@ async def evaluate_answer(
             raw2 = await _call_llm(retry_messages)
             parsed = _parse_llm_json(raw2)
         except Exception as exc:
-            logger.warning("Retry LLM call failed: %s", exc)
+            logger.warning("Ретрай LLM-вызова упал: %s", exc)
 
     if parsed is None:
-        logger.warning("JSON parsing failed after retry, returning fallback")
+        logger.warning("JSON не распарсился даже после ретрая, отдаём fallback")
         return _FALLBACK
 
     try:
         return EvaluationResult.model_validate(parsed)
     except ValidationError as exc:
-        logger.warning("EvaluationResult validation failed: %s", exc)
+        logger.warning("EvaluationResult не прошёл валидацию: %s", exc)
         return _FALLBACK
 
 
@@ -250,10 +262,11 @@ async def score_from_history(
     question: str,
     history: list[dict[str, str]],
 ) -> float:
-    """Score the current question based on whatever was said so far.
+    """Оценить вопрос по тому, что кандидат успел сказать в его рамках.
 
-    Returns 0.0 immediately if the candidate never responded.
-    Used by /skip and /finish to always record a score per question.
+    Используется в /skip и /finish — там нужно поставить балл за частичный ответ
+    (или 0, если кандидат вообще ничего не сказал). Не пробрасывает исключения:
+    при любых проблемах с LLM возвращаем 0, чтобы пропуск/завершение прошли.
     """
     if not any(m["role"] == "user" for m in history):
         return 0.0
@@ -267,12 +280,12 @@ async def score_from_history(
     try:
         raw = await _call_llm(messages)
     except Exception as exc:
-        logger.warning("score_from_history LLM call failed: %s", exc)
+        logger.warning("Не удалось получить оценку из истории через LLM: %s", exc)
         return 0.0
 
     m = re.search(r"\d+(?:[.,]\d+)?", raw)
     if not m:
-        logger.warning("score_from_history: could not parse number from %r", raw[:100])
+        logger.warning("score_from_history: не нашёл число в ответе %r", raw[:100])
         return 0.0
 
     try:

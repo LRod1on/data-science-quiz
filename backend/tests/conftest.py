@@ -1,13 +1,13 @@
-"""Ensure the backend directory is on sys.path for all tests."""
+"""Общая настройка pytest для тестов бэкенда."""
 
 import os
 import sys
 from pathlib import Path
 
-# Add backend/ to path so imports like `from session_manager import ...` work
-# regardless of where pytest is invoked from.
+# Кладём backend/ в sys.path, чтобы `from session_manager import ...` работал
+# независимо от того, откуда запускают pytest (из корня репо или из backend/).
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-# Set required env vars before any module-level imports happen
+# llm_service на импорте читает GIGACHAT_*, в тестах их подменяем заглушками.
 os.environ.setdefault("GIGACHAT_AUTH_KEY", "test-key")
 os.environ.setdefault("GIGACHAT_MODEL", "GigaChat")

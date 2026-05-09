@@ -1,3 +1,5 @@
+"""Тесты SessionManager: идемпотентность get_or_create, финализация темы и очистка."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -12,16 +14,12 @@ def manager() -> SessionManager:
     return SessionManager()
 
 
-# ---------------------------------------------------------------------------
-# 1. get_or_create identity
-# ---------------------------------------------------------------------------
-
-
 def test_get_or_create_returns_same_session(manager: SessionManager) -> None:
     first = manager.get_or_create("abc")
     second = manager.get_or_create("abc")
     assert first.session_id == second.session_id == "abc"
-    assert first is not second  # pydantic models are values, but same data
+    # get_or_create отдаёт копии — объекты разные, данные одинаковые.
+    assert first is not second
     assert manager._sessions["abc"].session_id == "abc"
 
 
@@ -32,11 +30,6 @@ def test_get_or_create_new_session_has_defaults(manager: SessionManager) -> None
     assert s.per_question_scores == []
     assert s.final_scores == {}
     assert s.chat_history == []
-
-
-# ---------------------------------------------------------------------------
-# 2. finalize_topic averages scores and clears per_question_scores
-# ---------------------------------------------------------------------------
 
 
 def test_finalize_topic_computes_average(manager: SessionManager) -> None:
@@ -53,6 +46,7 @@ def test_finalize_topic_computes_average(manager: SessionManager) -> None:
 
 
 def test_finalize_topic_accumulates_multiple_topics(manager: SessionManager) -> None:
+    """Один session_id должен копить final_scores при последовательном проходе тем."""
     manager.get_or_create("s2")
     manager.update("s2", topic="python", per_question_scores=[10.0, 10.0])
     manager.finalize_topic("s2")
@@ -65,15 +59,11 @@ def test_finalize_topic_accumulates_multiple_topics(manager: SessionManager) -> 
 
 
 def test_finalize_topic_no_scores_preserves_final_scores(manager: SessionManager) -> None:
+    """Финализация без баллов (никто ничего не ответил) не должна затирать final_scores."""
     manager.get_or_create("s3")
     manager.update("s3", topic="python", per_question_scores=[])
     result = manager.finalize_topic("s3")
     assert result.final_scores == {}
-
-
-# ---------------------------------------------------------------------------
-# 3. cleanup_stale removes old sessions, keeps fresh ones
-# ---------------------------------------------------------------------------
 
 
 def test_cleanup_stale_removes_old_session(
@@ -82,6 +72,7 @@ def test_cleanup_stale_removes_old_session(
     manager.get_or_create("old")
     manager.get_or_create("fresh")
 
+    # Руками искусственно состариваем сессию — обычно last_activity_at двигается через update().
     old_time = datetime.utcnow() - timedelta(minutes=90)
     manager._sessions["old"] = manager._sessions["old"].model_copy(
         update={"last_activity_at": old_time}

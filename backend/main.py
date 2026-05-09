@@ -1,3 +1,10 @@
+"""FastAPI-приложение тренажёра интервью.
+
+Здесь живут middleware (request-id, CORS, глобальный обработчик исключений),
+эндпоинты /start, /evaluate, /skip, /finish и логика связки между сессиями
+и LLM. Сами вызовы GigaChat и хранилище сессий вынесены в отдельные модули.
+"""
+
 import json
 import logging
 import os
@@ -13,8 +20,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-# llm_service читает GIGACHAT_* переменные на импорте — load_dotenv должен
-# выполниться до этих локальных импортов, поэтому E402 здесь подавлен намеренно.
+# llm_service читает GIGACHAT_* на импорте — load_dotenv должен выполниться
+# раньше следующих локальных импортов, поэтому E402 здесь подавлен намеренно.
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from llm_service import evaluate_answer, score_from_history, start_interview  # noqa: E402
@@ -22,7 +29,9 @@ from questions import QUESTIONS  # noqa: E402
 from session_manager import session_manager  # noqa: E402
 
 
-class _Fmt(logging.Formatter):
+class _RequestIdFormatter(logging.Formatter):
+    """Подставляет '-' вместо отсутствующего request_id, чтобы строка лога не падала."""
+
     def format(self, record: logging.LogRecord) -> str:
         if not hasattr(record, "request_id"):
             record.request_id = "-"
@@ -30,7 +39,9 @@ class _Fmt(logging.Formatter):
 
 
 _handler = logging.StreamHandler()
-_handler.setFormatter(_Fmt("%(asctime)s [%(levelname)s] request_id=%(request_id)s %(message)s"))
+_handler.setFormatter(
+    _RequestIdFormatter("%(asctime)s [%(levelname)s] request_id=%(request_id)s %(message)s")
+)
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger().addHandler(_handler)
 logger = logging.getLogger(__name__)
@@ -38,9 +49,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting up", extra={"request_id": "-"})
+    logger.info("Старт приложения", extra={"request_id": "-"})
     yield
-    logger.info("Shutting down", extra={"request_id": "-"})
+    logger.info("Остановка приложения", extra={"request_id": "-"})
 
 
 app = FastAPI(title="Interview Trainer API", lifespan=lifespan)
@@ -60,10 +71,11 @@ app.add_middleware(
 
 @app.middleware("http")
 async def attach_request_id(request: Request, call_next):
+    """Каждому HTTP-запросу присваивается UUID, который потом виден во всех логах и в X-Request-Id."""
     request_id = str(uuid.uuid4())
     request.state.request_id = request_id
     logger.info(
-        "Incoming %s %s",
+        "Входящий %s %s",
         request.method,
         request.url.path,
         extra={"request_id": request_id},
@@ -75,9 +87,10 @@ async def attach_request_id(request: Request, call_next):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Перехватывает всё, что не поймали хендлеры, и отдаёт 500 с request_id для отладки."""
     request_id: str = getattr(request.state, "request_id", "-")
     logger.error(
-        "Unhandled exception: %s\n%s",
+        "Необработанное исключение: %s\n%s",
         exc,
         traceback.format_exc(),
         extra={"request_id": request_id},
@@ -88,48 +101,45 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 _ALL_TOPICS = ["python", "classical_ml", "deep_learning", "nlp_cv"]
 
 
 def _build_final_scores(final_scores: dict[str, float], current_topic: str) -> dict:
-    """Return a score for all 4 topics.
+    """Собрать словарь баллов сразу по всем 4 темам для радар-чарта.
 
-    - Completed topics: their average score
-    - Current topic not in final_scores: all questions were skipped → null
-    - Other topics not yet attempted: 0
+    - пройденные темы: их фактический средний балл из final_scores
+    - текущая тема, которая в final_scores не попала (все вопросы пропустили без
+      ответа): None — на радаре отрисуется как «не отвечал»
+    - остальные темы: 0 — на радаре будет точка в центре
     """
-    result = {}
+    result: dict[str, float | None] = {}
     for t in _ALL_TOPICS:
         if t in final_scores:
             result[t] = final_scores[t]
         elif t == current_topic:
-            result[t] = None  # topic was attempted but all questions skipped
+            result[t] = None
         else:
             result[t] = 0
     return result
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
-
 @app.post("/health")
 async def health() -> dict[str, str]:
+    """Простейший liveness-чек."""
     return {"status": "ok"}
 
 
 @app.post("/start")
 async def start(request: Request) -> JSONResponse:
+    """Начать новую тему интервью.
+
+    Сбрасывает контекст темы (вопросы, история, баллы), но сохраняет
+    final_scores из ранее пройденных тем — один session_id живёт между темами.
+    """
     body = await request.json()
     session_id: str = body["session_id"]
     topic: str = body["topic"]
 
-    # Reset session for this topic (preserves final_scores from previous topics)
     session_manager.update(
         session_id,
         topic=topic,
@@ -144,7 +154,7 @@ async def start(request: Request) -> JSONResponse:
     result = await start_interview(topic=topic, asked_questions=[])
     question = result.first_question
 
-    # Checkpoint = 0 (empty history), then append the first question
+    # Чекпоинт = 0 (история пустая), сразу за ним идёт первый вопрос ассистента.
     session_manager.update(
         session_id,
         current_question=question,
@@ -159,6 +169,13 @@ async def start(request: Request) -> JSONResponse:
 
 @app.post("/evaluate")
 async def evaluate(request: Request) -> JSONResponse:
+    """Оценить очередной ход кандидата.
+
+    LLM возвращает один из трёх вариантов: попросить уточнения (CONTINUE),
+    засчитать вопрос и выдать следующий (NEXT_QUESTION), или засчитать пятый
+    подряд и завершить тему (TOPIC_COMPLETE). Если LLM упала — отдаём ERROR
+    с человеческим сообщением, состояние сессии при этом не трогаем.
+    """
     body = await request.json()
     session_id: str = body["session_id"]
     user_text: str = body["text"]
@@ -171,7 +188,8 @@ async def evaluate(request: Request) -> JSONResponse:
             content={"error": "Session not started. Call /start first."},
         )
 
-    # Slice history to current question context only
+    # Контекст для LLM — только текущий вопрос, без истории предыдущих,
+    # чтобы модель не теряла фокус и не путала темы.
     current_history = session.chat_history[session.history_checkpoint :]
 
     t0 = time.monotonic()
@@ -186,7 +204,7 @@ async def evaluate(request: Request) -> JSONResponse:
     except Exception as exc:
         llm_latency_ms = int((time.monotonic() - t0) * 1000)
         logger.error(
-            "LLM error in /evaluate: %s",
+            "Ошибка LLM в /evaluate: %s",
             exc,
             extra={"request_id": request_id},
         )
@@ -217,7 +235,8 @@ async def evaluate(request: Request) -> JSONResponse:
 
     llm_latency_ms = int((time.monotonic() - t0) * 1000)
 
-    # Build updated history: append user turn + assistant response
+    # В историю кладём ответ пользователя и реакцию ассистента — это либо
+    # уточняющий вопрос (если is_question_complete=False), либо финальный фидбек.
     assistant_content = (
         eval_result.clarifying_question
         if not eval_result.is_question_complete
@@ -235,16 +254,18 @@ async def evaluate(request: Request) -> JSONResponse:
     new_question_index = session.question_index
 
     if not eval_result.is_question_complete:
-        # Still on the same question (LLM asked a clarification)
+        # Остаёмся на том же вопросе — LLM попросила уточнение.
         action = "CONTINUE"
         session_manager.update(session_id, chat_history=new_history)
 
     else:
-        # Question is complete — record score (fall back to 0 if LLM returned null)
+        # Вопрос засчитан. Если LLM при этом прислала score=null
+        # (нарушение контракта в _SYSTEM_PROMPT) — пишем 0 и логируем,
+        # чтобы не падать и видеть факт нарушения в логах.
         score = eval_result.score
         if score is None:
             logger.warning(
-                "score=null despite is_question_complete=true (session=%s, q=%d), defaulting to 0",
+                "score=null при is_question_complete=true (session=%s, q=%d), пишем 0",
                 session_id,
                 session.question_index,
             )
@@ -252,7 +273,7 @@ async def evaluate(request: Request) -> JSONResponse:
         new_scores = [*session.per_question_scores, score]
 
         if session.question_index >= 5:
-            # All 5 questions done — finalize topic
+            # Пятый засчитанный вопрос — финализируем тему.
             session_manager.update(
                 session_id, per_question_scores=new_scores, chat_history=new_history
             )
@@ -262,10 +283,10 @@ async def evaluate(request: Request) -> JSONResponse:
             final_scores = _build_final_scores(final_session.final_scores, session.topic)
 
         else:
-            # Move to next question
+            # Двигаемся на следующий вопрос. Если LLM не прислала свой —
+            # берём из локального банка, чтобы интервью не зависло.
             next_question = eval_result.next_question
             if not next_question:
-                # LLM didn't generate a next question — fall back to the bank
                 pool = [q for q in QUESTIONS[session.topic] if q not in session.asked_questions]
                 if not pool:
                     pool = QUESTIONS[session.topic]
@@ -273,7 +294,8 @@ async def evaluate(request: Request) -> JSONResponse:
 
             new_asked = [*session.asked_questions, next_question]
             new_question_index = session.question_index + 1
-            # Checkpoint: after current turn, before next question
+            # Чекпоинт двигаем сразу за завершённый ход — следующий вопрос
+            # будет оцениваться в чистом контексте.
             checkpoint = len(new_history)
             new_history_with_next = [*new_history, {"role": "assistant", "content": next_question}]
             session_manager.update(
@@ -316,6 +338,7 @@ async def evaluate(request: Request) -> JSONResponse:
 
 @app.post("/finish")
 async def finish(request: Request) -> JSONResponse:
+    """Досрочно завершить тему: ставим балл за текущий вопрос и финализируем."""
     body = await request.json()
     session_id: str = body["session_id"]
 
@@ -326,7 +349,7 @@ async def finish(request: Request) -> JSONResponse:
             content={"error": "Session not started. Call /start first."},
         )
 
-    # Score whatever the candidate said on the current question before finalizing
+    # Балл за текущий вопрос ставим по тому, что кандидат уже успел сказать.
     current_history = session.chat_history[session.history_checkpoint :]
     score = await score_from_history(session.topic, session.current_question or "", current_history)
     session_manager.update(session_id, per_question_scores=[*session.per_question_scores, score])
@@ -347,6 +370,7 @@ async def finish(request: Request) -> JSONResponse:
 
 @app.post("/skip")
 async def skip(request: Request) -> JSONResponse:
+    """Пропустить текущий вопрос. Балл ставится по тому, что успели сказать (или 0)."""
     body = await request.json()
     session_id: str = body["session_id"]
 
@@ -357,12 +381,11 @@ async def skip(request: Request) -> JSONResponse:
             content={"error": "Session not started. Call /start first."},
         )
 
-    # Score whatever was said on the current question before skipping
     current_history = session.chat_history[session.history_checkpoint :]
     score = await score_from_history(session.topic, session.current_question or "", current_history)
     new_scores = [*session.per_question_scores, score]
 
-    # Add skipped question to asked_questions so it won't be repeated
+    # Пропущенный вопрос помечаем как заданный, чтобы /skip → /skip → ... не повторял его.
     new_asked = list(session.asked_questions)
     if session.current_question and session.current_question not in new_asked:
         new_asked.append(session.current_question)
@@ -370,7 +393,7 @@ async def skip(request: Request) -> JSONResponse:
     new_index = session.question_index + 1
 
     if new_index > 5:
-        # Skipped the last question — finalize with the just-scored question
+        # Пропустили пятый — тема всё равно завершена, считаем средний.
         session_manager.update(
             session_id, asked_questions=new_asked, per_question_scores=new_scores
         )
@@ -386,12 +409,13 @@ async def skip(request: Request) -> JSONResponse:
             }
         )
 
-    # Pick next question from bank (not from LLM)
+    # Следующий вопрос берём из банка (а не у LLM) — у LLM просили только оценить ответ.
     result = await start_interview(topic=session.topic, asked_questions=new_asked)
     next_question = result.first_question
     new_asked.append(next_question)
 
-    # Move the history checkpoint to the end of current history (drop skipped Q context)
+    # Чекпоинт двигаем в конец текущей истории — новый вопрос начинается
+    # «с чистого листа», без контекста пропущенного.
     checkpoint = len(session.chat_history)
     new_history = [*session.chat_history, {"role": "assistant", "content": next_question}]
 
