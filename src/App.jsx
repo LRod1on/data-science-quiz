@@ -1,5 +1,4 @@
 import React from 'react';
-import { createAssistant, createSmartappDebugger } from '@salutejs/client';
 
 import './App.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -12,23 +11,7 @@ import {
   skipQuestion,
   finishInterview,
 } from './api/interviewApi';
-
-const initializeAssistant = (getState) => {
-  if (process.env.NODE_ENV === 'development') {
-    return createSmartappDebugger({
-      token: process.env.REACT_APP_TOKEN ?? '',
-      initPhrase: `Запусти ${process.env.REACT_APP_SMARTAPP}`,
-      getState,
-      nativePanel: {
-        defaultText: 'начни интервью по питону',
-        screenshotMode: false,
-        tabIndex: -1,
-      },
-    });
-  } else {
-    return createAssistant({ getState });
-  }
-};
+import { createAssistantInstance, speak } from './services/assistant';
 
 export class App extends React.Component {
   constructor(props) {
@@ -52,7 +35,7 @@ export class App extends React.Component {
       lastError: null,
     };
 
-    this.assistant = initializeAssistant(() => this.getStateForAssistant());
+    this.assistant = createAssistantInstance(() => this.getStateForAssistant());
 
     this.assistant.on('data', (event) => {
       if (event.type === 'character' || event.type === 'tts') {
@@ -109,27 +92,6 @@ export class App extends React.Component {
     }
   }
 
-  _speakText(text) {
-    if (!text) return;
-    if (process.env.NODE_ENV === 'development') {
-      window.speechSynthesis?.cancel();
-      const utt = new SpeechSynthesisUtterance(text);
-      utt.lang = 'ru-RU';
-      window.speechSynthesis?.speak(utt);
-      return;
-    }
-    try {
-      const unsubscribe = this.assistant.sendData(
-        { action: { action_id: 'SPEAK' }, eventData: { text } },
-        () => {
-          if (typeof unsubscribe === 'function') unsubscribe();
-        }
-      );
-    } catch (err) {
-      console.warn('assistant.sendData(SPEAK) failed:', err);
-    }
-  }
-
   _handleEvaluateResponse(data) {
     const { action, feedback, next_question: nextQ, question_index, final_scores } = data;
 
@@ -144,7 +106,7 @@ export class App extends React.Component {
           [prev.currentTopic]: final_scores?.[prev.currentTopic] ?? null,
         },
       }));
-      this._speakText(feedback);
+      speak(this.assistant, feedback);
       return;
     }
 
@@ -156,7 +118,7 @@ export class App extends React.Component {
         lastError: null,
         answerBuffer: '',
       });
-      this._speakText(feedback);
+      speak(this.assistant, feedback);
       return;
     }
 
@@ -168,14 +130,14 @@ export class App extends React.Component {
         lastError: null,
         answerBuffer: '',
       });
-      this._speakText(feedback);
+      speak(this.assistant, feedback);
       return;
     }
 
     // ERROR или неизвестный action — буфер не чистим, чтобы пользователь
     // мог повторить «готово» с тем же ответом.
     this.setState({ isLoading: false, lastError: feedback || 'Ошибка сервера' });
-    this._speakText(feedback);
+    speak(this.assistant, feedback);
   }
 
   async handleStartInterview(topic) {
@@ -192,7 +154,7 @@ export class App extends React.Component {
     try {
       const data = await startInterview(this.sessionId, topic);
       this.setState({ questionText: data.question, isLoading: false });
-      this._speakText(data.pronounce_text);
+      speak(this.assistant, data.pronounce_text);
     } catch (err) {
       this.setState({ status: 'welcome', isLoading: false, lastError: err.message });
     }
@@ -216,7 +178,7 @@ export class App extends React.Component {
     if (this.state.status !== 'interview' || this.state.isLoading) return;
     const buffered = this.state.answerBuffer.trim();
     if (!buffered) {
-      this._speakText('Я не услышал ответ. Скажите его и затем «готово».');
+      speak(this.assistant, 'Я не услышал ответ. Скажите его и затем «готово».');
       return;
     }
     this.setState({ isLoading: true, lastError: null });
