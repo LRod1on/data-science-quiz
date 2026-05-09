@@ -37,10 +37,10 @@ SmartApp для устройств Сбера (SberBox, SberPortal, Салют) 
        │
        ▼
  FastAPI-бэкенд (localhost:8000)
- — управляет сессиями, вызывает LLM через OpenRouter
+ — управляет сессиями, вызывает LLM через GigaChat
        │
        ▼
- LLM (Qwen через OpenRouter)
+ LLM (GigaChat, Sber)
  — оценивает ответ, генерирует фидбек и следующий вопрос
 ```
 
@@ -67,13 +67,15 @@ SmartApp для устройств Сбера (SberBox, SberPortal, Салют) 
 - **yarn** (`npm install -g yarn`)
 - **Python** 3.11+
 - Аккаунт в [SmartApp Studio](https://developers.sber.ru/studio/) (для голосовой интеграции)
-- Ключ **OpenRouter** (для LLM)
+- Доступ к **GigaChat API** (для LLM) — авторизационные данные из [GigaChat Studio](https://developers.sber.ru/studio/)
 
 ---
 
 ## Настройка окружения
 
-Скопируй `.env.sample` в `.env` и заполни:
+Конфиги разнесены: фронт и бэк читают **свои** `.env`-файлы.
+
+### Корневой `.env` — только фронт (CRA)
 
 ```bash
 cp .env.sample .env
@@ -89,20 +91,28 @@ REACT_APP_SMARTAPP=""
 # URL бэкенда (по умолчанию локальный)
 REACT_APP_BACKEND_URL=http://localhost:8000
 
-# OpenRouter API key (для LLM)
-OPENROUTER_API_KEY=""
-
-# Модель через OpenRouter (можно менять)
-OPENROUTER_MODEL="qwen/qwen-2.5-72b-instruct"
-
-# CORS: откуда разрешены запросы к бэкенду
-CORS_ORIGINS=http://localhost:3000
-
 # Опционально: запретить автооткрытие браузера
 BROWSER=none
 ```
 
-После изменения `.env` требуется **полный перезапуск** обоих серверов.
+### `backend/.env` — только бэкенд
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+```dotenv
+# GigaChat API: base64(Client_ID:Client_Secret) из GigaChat Studio
+GIGACHAT_AUTH_KEY=""
+
+# Модель GigaChat (GigaChat | GigaChat-Pro | GigaChat-Max)
+GIGACHAT_MODEL=GigaChat
+
+# CORS: откуда фронту разрешено стучаться к бэку
+CORS_ORIGINS=http://localhost:3000
+```
+
+После изменения `.env` требуется **полный перезапуск** соответствующего сервера (CRA/uvicorn).
 
 ---
 
@@ -180,7 +190,9 @@ yarn start    # запустить dev-сервер на localhost:3000
 | _(любой текст)_ | Фрагмент накапливается в буфере ответа |
 | «готово» | Отправить накопленный ответ на оценку |
 | «дальше» / «следующий» / «пропустить» | Пропустить вопрос |
-| «закончить» / «завершить» | Завершить тему досрочно |
+| «сдаюсь» / «не знаю» / «пас» | Пропустить с нулевой оценкой |
+| «закончить» / «завершить» / «хватит» | Завершить тему досрочно и показать результаты |
+| «покажи результаты» / «итоги» | Завершить тему и показать радар-чарт |
 
 Ответ можно произносить несколькими репликами — они склеиваются. Команда «готово» отправляет всё накопленное.
 
@@ -256,7 +268,7 @@ yarn start    # запустить dev-сервер на localhost:3000
 │
 ├── backend/                    # FastAPI-бэкенд
 │   ├── main.py                 # Маршруты и middleware
-│   ├── llm_service.py          # Интеграция с OpenRouter (Qwen)
+│   ├── llm_service.py          # Интеграция с GigaChat
 │   ├── session_manager.py      # In-memory хранилище сессий
 │   ├── questions.py            # Банк вопросов по темам
 │   └── requirements.txt
@@ -268,7 +280,8 @@ yarn start    # запустить dev-сервер на localhost:3000
 │       └── js/actions.js       # JS-хелперы сценариев
 │
 ├── scenario-new.zip            # Архив для загрузки в SmartApp Studio
-├── .env.sample                 # Шаблон переменных окружения
+├── .env.sample                 # Шаблон переменных фронта (REACT_APP_*)
+├── backend/.env.example        # Шаблон переменных бэка (GIGACHAT_*, CORS_ORIGINS)
 └── CLAUDE.md                   # Инструкции для Claude Code
 ```
 
@@ -284,8 +297,9 @@ yarn start    # запустить dev-сервер на localhost:3000
 
 ### Бэкенд возвращает ошибку LLM
 
-- Проверь `OPENROUTER_API_KEY` в `.env`
-- Убедись, что выбранная модель `OPENROUTER_MODEL` доступна на твоём тарифе OpenRouter
+- Проверь `GIGACHAT_AUTH_KEY` в `.env` (это `base64(Client_ID:Client_Secret)`, а не сам Client_ID)
+- Убедись, что значение `GIGACHAT_MODEL` доступно на твоём тарифе GigaChat (`GigaChat`, `GigaChat-Pro`, `GigaChat-Max`)
+- Если в логах `SSL: CERTIFICATE_VERIFY_FAILED` — это ожидаемо: GigaChat использует российский CA, в коде `httpx.AsyncClient(verify=False)` это уже учтено
 
 ### `npm install` завершается ошибкой про typescript
 

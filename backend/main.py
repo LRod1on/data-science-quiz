@@ -14,12 +14,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 import os
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 import random
 
 from session_manager import session_manager
-from llm_service import start_interview, evaluate_answer
+from llm_service import start_interview, evaluate_answer, score_from_history
 from questions import QUESTIONS
 
 
@@ -235,12 +235,16 @@ async def evaluate(request: Request) -> JSONResponse:
         session_manager.update(session_id, chat_history=new_history)
 
     else:
-        # Question is complete — record score if present
-        new_scores = (
-            session.per_question_scores + [eval_result.score]
-            if eval_result.score is not None
-            else session.per_question_scores
-        )
+        # Question is complete — record score (fall back to 0 if LLM returned null)
+        score = eval_result.score
+        if score is None:
+            logger.warning(
+                "score=null despite is_question_complete=true (session=%s, q=%d), defaulting to 0",
+                session_id,
+                session.question_index,
+            )
+            score = 0.0
+        new_scores = session.per_question_scores + [score]
 
         if session.question_index >= 5:
             # All 5 questions done — finalize topic
@@ -313,6 +317,11 @@ async def finish(request: Request) -> JSONResponse:
             content={"error": "Session not started. Call /start first."},
         )
 
+    # Score whatever the candidate said on the current question before finalizing
+    current_history = session.chat_history[session.history_checkpoint:]
+    score = await score_from_history(session.topic, session.current_question or "", current_history)
+    session_manager.update(session_id, per_question_scores=session.per_question_scores + [score])
+
     final_session = session_manager.finalize_topic(session_id)
     final_scores = _build_final_scores(final_session.final_scores, session.topic)
 
@@ -337,6 +346,11 @@ async def skip(request: Request) -> JSONResponse:
             content={"error": "Session not started. Call /start first."},
         )
 
+    # Score whatever was said on the current question before skipping
+    current_history = session.chat_history[session.history_checkpoint:]
+    score = await score_from_history(session.topic, session.current_question or "", current_history)
+    new_scores = session.per_question_scores + [score]
+
     # Add skipped question to asked_questions so it won't be repeated
     new_asked = list(session.asked_questions)
     if session.current_question and session.current_question not in new_asked:
@@ -345,8 +359,8 @@ async def skip(request: Request) -> JSONResponse:
     new_index = session.question_index + 1
 
     if new_index > 5:
-        # Skipped the last question — finalize without adding a score
-        session_manager.update(session_id, asked_questions=new_asked)
+        # Skipped the last question — finalize with the just-scored question
+        session_manager.update(session_id, asked_questions=new_asked, per_question_scores=new_scores)
         final_session = session_manager.finalize_topic(session_id)
         final_scores = _build_final_scores(final_session.final_scores, session.topic)
         return JSONResponse(content={
@@ -375,6 +389,7 @@ async def skip(request: Request) -> JSONResponse:
         asked_questions=new_asked,
         chat_history=new_history,
         history_checkpoint=checkpoint,
+        per_question_scores=new_scores,
     )
 
     return JSONResponse(content={

@@ -77,13 +77,16 @@ async def _get_access_token() -> str:
 _SYSTEM_PROMPT = """\
 Ты Senior Data Scientist, проводишь техническое интервью по теме {topic}.
 Вопросы уровня senior. Оценивай ответы по шкале 0-10, где 10 — идеальный senior-ответ.
-Если ответ неполный — задай один уточняющий вопрос.
-Если ответ исчерпывающий или кандидат сдался — оцени и переходи к следующему.
+Если ответ неполный — задай один уточняющий вопрос (is_question_complete=false, score=null).
+Если ответ исчерпывающий или кандидат сдался — поставь оценку и переходи к следующему (is_question_complete=true, score=ОБЯЗАТЕЛЬНОЕ число 0-10, НЕ null).
 Уже заданные вопросы (не повторяй): {asked}.
 Отвечай СТРОГО валидным JSON без markdown-ограждений.
 
+Правило: если is_question_complete=true, то score ВСЕГДА должен быть числом 0-10, никогда не null.
+
 Формат ответа — только этот JSON, без пояснений:
-{{"score": <число 0-10 или null>, "feedback": "<фидбек на русском, 2-3 предложения>", \
+{{"score": <число 0-10 если вопрос завершён, null если задаёшь уточняющий вопрос>, \
+"feedback": "<фидбек на русском, 2-3 предложения>", \
 "is_question_complete": <true|false>, \
 "next_question": "<следующий вопрос или null>", \
 "clarifying_question": "<уточняющий вопрос или null>"}}"""
@@ -92,6 +95,14 @@ _RETRY_PROMPT = (
     "Верни ТОЛЬКО валидный JSON без markdown и без пояснений. "
     "Ничего кроме JSON-объекта."
 )
+
+_SCORE_FROM_HISTORY_PROMPT = """\
+Ты оцениваешь ответ кандидата на техническое интервью по теме {topic}.
+Вопрос: {question}
+
+Оцени знания кандидата на основании диалога выше по шкале 0-10, где 10 — идеальный senior-ответ.
+Если кандидат не дал содержательного ответа или сдался — ставь низкую оценку.
+Верни ТОЛЬКО число от 0 до 10 (можно дробное, например 6.5). Без пояснений, без текста."""
 
 # ---------------------------------------------------------------------------
 # Result models
@@ -232,3 +243,40 @@ async def evaluate_answer(
     except ValidationError as exc:
         logger.warning("EvaluationResult validation failed: %s", exc)
         return _FALLBACK
+
+
+async def score_from_history(
+    topic: str,
+    question: str,
+    history: list[dict[str, str]],
+) -> float:
+    """Score the current question based on whatever was said so far.
+
+    Returns 0.0 immediately if the candidate never responded.
+    Used by /skip and /finish to always record a score per question.
+    """
+    if not any(m["role"] == "user" for m in history):
+        return 0.0
+
+    system = _SCORE_FROM_HISTORY_PROMPT.format(topic=topic, question=question)
+    messages: list[dict] = [
+        {"role": "system", "content": system},
+        *history,
+    ]
+
+    try:
+        raw = await _call_llm(messages)
+    except Exception as exc:
+        logger.warning("score_from_history LLM call failed: %s", exc)
+        return 0.0
+
+    m = re.search(r"\d+(?:[.,]\d+)?", raw)
+    if not m:
+        logger.warning("score_from_history: could not parse number from %r", raw[:100])
+        return 0.0
+
+    try:
+        score = float(m.group().replace(",", "."))
+        return max(0.0, min(10.0, score))
+    except ValueError:
+        return 0.0

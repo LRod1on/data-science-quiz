@@ -277,7 +277,8 @@ def test_skip_moves_to_next_question(client, fresh_session_manager):
     assert data["final_scores"] is None
 
 
-def test_skip_does_not_add_score(client, fresh_session_manager):
+def test_skip_without_user_answer_records_zero(client, fresh_session_manager):
+    """Skipping a question with no user turn → score 0 (no LLM call needed)."""
     fresh_session_manager.update(
         SESSION_ID,
         topic=TOPIC,
@@ -295,7 +296,7 @@ def test_skip_does_not_add_score(client, fresh_session_manager):
     with patch("main.start_interview", new=AsyncMock(return_value=next_q_result)):
         client.post("/skip", json={"session_id": SESSION_ID})
     session = fresh_session_manager.get_or_create(SESSION_ID)
-    assert session.per_question_scores == []  # no score added
+    assert session.per_question_scores == [0.0]
 
 
 def test_skip_adds_skipped_and_new_question_to_asked(client, fresh_session_manager):
@@ -361,15 +362,15 @@ def test_skip_last_question_returns_topic_complete(client, fresh_session_manager
     assert set(data["final_scores"].keys()) == {"python", "classical_ml", "deep_learning", "nlp_cv"}
 
 
-def test_skip_all_five_topic_score_is_null(client, fresh_session_manager):
-    """If all 5 questions are skipped, topic score should be null (not 0)."""
-    # Simulate 4 already-skipped, now skipping the 5th
+def test_skip_all_five_topic_score_is_zero(client, fresh_session_manager):
+    """If all 5 questions are skipped without answering, topic score is 0 (avg of zeros)."""
+    # Simulate 4 already-skipped (each scored 0), now skipping the 5th
     fresh_session_manager.update(
         SESSION_ID,
         topic=TOPIC,
         question_index=5,
         current_question="Q5",
-        per_question_scores=[],  # all skipped, no scores
+        per_question_scores=[0.0, 0.0, 0.0, 0.0],
         chat_history=[{"role": "assistant", "content": "Q5"}],
         history_checkpoint=0,
         asked_questions=["Q1", "Q2", "Q3", "Q4", "Q5"],
@@ -377,5 +378,5 @@ def test_skip_all_five_topic_score_is_null(client, fresh_session_manager):
     resp = client.post("/skip", json={"session_id": SESSION_ID})
     data = resp.json()
     assert data["action"] == "TOPIC_COMPLETE"
-    assert data["final_scores"]["python"] is None  # all-skipped → null
+    assert data["final_scores"]["python"] == 0.0
     assert data["final_scores"]["classical_ml"] == 0  # not attempted → 0

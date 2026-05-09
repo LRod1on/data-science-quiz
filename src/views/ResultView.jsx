@@ -14,12 +14,14 @@ import { TOPICS } from '../constants/topics';
 ChartJS.register(RadialLinearScale, PointElement, LineElement, Filler, Tooltip);
 
 const Wrapper = styled.div`
-  min-height: calc(100vh - var(--bottom-inset, 0px));
+  min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 48px;
+  padding-bottom: calc(48px + var(--bottom-inset, 0px));
+  box-sizing: border-box;
 `;
 
 const Title = styled.h1`
@@ -30,9 +32,9 @@ const Title = styled.h1`
 `;
 
 const ChartWrapper = styled.div`
-  width: 460px;
-  height: 460px;
-  margin-bottom: 36px;
+  width: 360px;
+  height: 360px;
+  margin-bottom: 28px;
 `;
 
 const ScoreGrid = styled.div`

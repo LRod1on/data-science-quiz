@@ -8,5 +8,5 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Set required env vars before any module-level imports happen
-os.environ.setdefault("OPENROUTER_API_KEY", "test-key")
-os.environ.setdefault("OPENROUTER_MODEL", "test-model")
+os.environ.setdefault("GIGACHAT_AUTH_KEY", "test-key")
+os.environ.setdefault("GIGACHAT_MODEL", "GigaChat")

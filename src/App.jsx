@@ -120,7 +120,7 @@ export class App extends React.Component {
       case 'GIVE_UP':
         return this.handleNextQuestion();
       case 'END_INTERVIEW':
-        return this.handleEndInterview();
+        return this.handleEndOrFinish();
       case 'SHOW_RESULTS':
         return this.handleShowResults();
       default:
@@ -258,7 +258,7 @@ export class App extends React.Component {
   }
 
   async handleFinishInterview() {
-    if (this.state.isLoading) return;
+    if (this.state.status !== 'interview' || this.state.isLoading) return;
     this.setState({ isLoading: true, lastError: null, answerBuffer: '' });
     try {
       const data = await finishInterview(this.sessionId);
@@ -280,8 +280,13 @@ export class App extends React.Component {
     });
   }
 
+  handleEndOrFinish() {
+    if (this.state.status === 'interview') return this.handleFinishInterview();
+    if (this.state.status === 'results') return this.handleEndInterview();
+  }
+
   handleShowResults() {
-    this.setState({ status: 'results' });
+    if (this.state.status === 'interview') return this.handleFinishInterview();
   }
 
   render() {
