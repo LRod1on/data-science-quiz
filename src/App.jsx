@@ -12,6 +12,7 @@ import {
   finishInterview,
 } from './api/interviewApi';
 import { createAssistantInstance, speak } from './services/assistant';
+import { decodeEvaluateResponse } from './services/evaluationDispatch';
 
 export class App extends React.Component {
   constructor(props) {
@@ -92,52 +93,11 @@ export class App extends React.Component {
     }
   }
 
-  _handleEvaluateResponse(data) {
-    const { action, feedback, next_question: nextQ, question_index, final_scores } = data;
-
-    if (action === 'TOPIC_COMPLETE') {
-      this.setState((prev) => ({
-        status: 'results',
-        isLoading: false,
-        lastError: null,
-        answerBuffer: '',
-        radarScores: {
-          ...prev.radarScores,
-          [prev.currentTopic]: final_scores?.[prev.currentTopic] ?? null,
-        },
-      }));
-      speak(this.assistant, feedback);
-      return;
-    }
-
-    if (action === 'NEXT_QUESTION') {
-      this.setState({
-        questionText: nextQ,
-        questionIndex: question_index,
-        isLoading: false,
-        lastError: null,
-        answerBuffer: '',
-      });
-      speak(this.assistant, feedback);
-      return;
-    }
-
-    if (action === 'CONTINUE') {
-      // LLM попросила уточнить — feedback и есть текст уточняющего вопроса.
-      this.setState({
-        questionText: feedback,
-        isLoading: false,
-        lastError: null,
-        answerBuffer: '',
-      });
-      speak(this.assistant, feedback);
-      return;
-    }
-
-    // ERROR или неизвестный action — буфер не чистим, чтобы пользователь
-    // мог повторить «готово» с тем же ответом.
-    this.setState({ isLoading: false, lastError: feedback || 'Ошибка сервера' });
-    speak(this.assistant, feedback);
+  applyEvaluateResponse(data) {
+    const { stateUpdate, speechText } = decodeEvaluateResponse(data, this.state.currentTopic);
+    // setState принимает и объект, и функцию-апдейтер — отдаём как есть.
+    this.setState(stateUpdate);
+    speak(this.assistant, speechText);
   }
 
   async handleStartInterview(topic) {
@@ -184,7 +144,7 @@ export class App extends React.Component {
     this.setState({ isLoading: true, lastError: null });
     try {
       const data = await evaluateAnswer(this.sessionId, buffered);
-      this._handleEvaluateResponse(data);
+      this.applyEvaluateResponse(data);
     } catch (err) {
       this.setState({ isLoading: false, lastError: err.message });
     }
@@ -195,7 +155,7 @@ export class App extends React.Component {
     this.setState({ isLoading: true, lastError: null, answerBuffer: '' });
     try {
       const data = await skipQuestion(this.sessionId);
-      this._handleEvaluateResponse(data);
+      this.applyEvaluateResponse(data);
     } catch (err) {
       this.setState({ isLoading: false, lastError: err.message });
     }
@@ -206,7 +166,7 @@ export class App extends React.Component {
     this.setState({ isLoading: true, lastError: null, answerBuffer: '' });
     try {
       const data = await finishInterview(this.sessionId);
-      this._handleEvaluateResponse(data);
+      this.applyEvaluateResponse(data);
     } catch (err) {
       this.setState({ isLoading: false, lastError: err.message });
     }
