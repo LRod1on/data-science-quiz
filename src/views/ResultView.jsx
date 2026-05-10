@@ -57,31 +57,25 @@ const ScoreValue = styled.span`
   font-weight: 600;
 `;
 
-const Hint = styled.p`
-  font-size: 20px;
-  color: rgba(255, 255, 255, 0.45);
-  text-align: center;
-  max-width: 700px;
-  margin: 0 0 40px;
-  line-height: 1.5;
+const ButtonsRow = styled.div`
+  display: flex;
+  gap: 24px;
 `;
 
-const RestartButton = styled.button`
+const ActionButton = styled.button`
   background: rgba(255, 255, 255, 0.1);
   border: 1.5px solid rgba(255, 255, 255, 0.3);
   border-radius: 16px;
   color: #fff;
-  font-size: 26px;
-  padding: 18px 56px;
+  font-size: 24px;
+  padding: 16px 36px;
   cursor: pointer;
   transition: background 0.15s;
 
-  &:hover {
-    background: rgba(255, 255, 255, 0.18);
-  }
+  &:hover { background: rgba(255, 255, 255, 0.18); }
 `;
 
-// Конфиг chart.js: радар 0..10, без анимации (на TV-экранах SberBox
+// Конфиг chart.js: радар 0..100, без анимации (на TV-экранах SberBox
 // она тормозит), цвета подобраны под тёмную тему приложения.
 const CHART_OPTIONS = {
   responsive: true,
@@ -90,7 +84,7 @@ const CHART_OPTIONS = {
   scales: {
     r: {
       min: 0,
-      max: 10,
+      max: 100,
       ticks: { display: false },
       grid: { color: 'rgba(255, 255, 255, 0.2)' },
       angleLines: { color: 'rgba(255, 255, 255, 0.2)' },
@@ -103,16 +97,14 @@ const CHART_OPTIONS = {
   plugins: { legend: { display: false } },
 };
 
-export function ResultView({ scores, onRestart }) {
-  const playedTopics = TOPICS.filter((t) => scores[t.key] !== null);
-  const unplayedTopics = TOPICS.filter((t) => scores[t.key] === null);
+export function ResultView({ scores, onMoreTopic, onResetAll }) {
 
   const chartData = {
     labels: TOPICS.map((t) => t.label),
     datasets: [
       {
         label: 'Результат',
-        data: TOPICS.map((t) => scores[t.key] ?? 0),
+        data: TOPICS.map((t) => (scores[t.key] != null ? Math.round(scores[t.key] * 100) : 0)),
         backgroundColor: 'rgba(255, 255, 255, 0.08)',
         borderColor: 'rgba(255, 255, 255, 0.7)',
         pointBackgroundColor: TOPICS.map((t) =>
@@ -138,25 +130,17 @@ export function ResultView({ scores, onRestart }) {
             <ScoreRow key={t.key} $played={played}>
               <span>{t.label}</span>
               <ScoreValue>
-                {played ? `${scores[t.key].toFixed(1)} / 10` : '— / 10'}
+                {played ? `${Math.round(scores[t.key] * 100)} %` : '— %'}
               </ScoreValue>
             </ScoreRow>
           );
         })}
       </ScoreGrid>
 
-      {unplayedTopics.length > 0 && (
-        <Hint>
-          Пройдено:{' '}
-          {playedTopics.length > 0
-            ? playedTopics.map((t) => t.label).join(', ')
-            : 'ничего'}
-          . Чтобы пройти остальные — скажи &laquo;начни{' '}
-          {unplayedTopics[0].label}&raquo;.
-        </Hint>
-      )}
-
-      <RestartButton onClick={onRestart}>Начать заново</RestartButton>
+      <ButtonsRow>
+        <ActionButton onClick={onMoreTopic}>Пройти ещё тему</ActionButton>
+        <ActionButton onClick={onResetAll}>Начать заново</ActionButton>
+      </ButtonsRow>
     </Wrapper>
   );
 }
