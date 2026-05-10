@@ -18,9 +18,9 @@ theme: /
         # При запуске приложения с кнопки прилетит сообщение /start.
         q!: $regex</start>
         # При запуске с голоса или через createSmartappDebugger (initPhrase) прилетит
-        # «Запусти <имя приложения>». Ловим любой вариант, чтобы не провалиться в ОтветПользователя.
+        # «Запусти <имя приложения>». Ловим любой вариант, чтобы не провалиться в Fallback.
         q!: (запусти | открой | вруби) $AnyText
-        a: Привет! Я проведу с тобой интервью по Data Science. Выбери тему: Python, Classical ML, Deep Learning или NLP и Computer Vision.
+        a: Привет! Это квиз по Data Science. Выбери тему: Python, Classical ML, Deep Learning или NLP и Computer Vision.
 
     state: Fallback
         event!: noMatch

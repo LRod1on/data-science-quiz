@@ -3,45 +3,37 @@ import React from 'react';
 import './App.css';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { WelcomeView } from './views/WelcomeView';
-import { InterviewView } from './views/InterviewView';
+import { LengthPickView } from './views/LengthPickView';
+import { QuizView } from './views/QuizView';
 import { ResultView } from './views/ResultView';
-import {
-  startInterview,
-  evaluateAnswer,
-  skipQuestion,
-  finishInterview,
-} from './api/interviewApi';
 import { createAssistantInstance, speak } from './services/assistant';
-import { decodeEvaluateResponse } from './services/evaluationDispatch';
+import {
+  initial,
+  chooseTopic,
+  chooseLength,
+  pickAnswer,
+  markUnknown,
+  nextQuestion,
+  finishTopic,
+  restart,
+  resetAll,
+} from './services/quizEngine';
+
+const TOPIC_VOICE_LABELS = {
+  python: 'Python',
+  classical_ml: 'Классический ML',
+  deep_learning: 'Deep Learning',
+  nlp_cv: 'NLP и Computer Vision',
+};
 
 export class App extends React.Component {
   constructor(props) {
     super(props);
-
-    this.sessionId = crypto.randomUUID();
-
-    this.state = {
-      status: 'welcome',       // 'welcome' | 'interview' | 'results'
-      currentTopic: null,      // ключ темы из constants/topics или null на welcome
-      questionIndex: 0,        // 1..5 во время интервью, 0 на welcome
-      questionText: '',
-      answerBuffer: '',        // фрагменты речи, склеенные пробелами; чистится при FINISH_ANSWER
-      isLoading: false,
-      radarScores: {
-        python: null,
-        classical_ml: null,
-        deep_learning: null,
-        nlp_cv: null,
-      },
-      lastError: null,
-    };
-
+    this.state = initial();
     this.assistant = createAssistantInstance(() => this.getStateForAssistant());
 
     this.assistant.on('data', (event) => {
-      if (event.type === 'character' || event.type === 'tts') {
-        return;
-      }
+      if (event.type === 'character' || event.type === 'tts') return;
       if (event.type === 'insets' || event.type === 'dynamic_insets') {
         const bottom = event?.insets?.bottom ?? 0;
         document.documentElement.style.setProperty('--bottom-inset', `${bottom}px`);
@@ -56,7 +48,8 @@ export class App extends React.Component {
   }
 
   getStateForAssistant() {
-    if (this.state.status === 'welcome') {
+    const { status, questionPlan, questionIdx } = this.state;
+    if (status === 'welcome') {
       return {
         item_selector: {
           items: [
@@ -65,7 +58,34 @@ export class App extends React.Component {
             { number: 3, id: 'deep_learning', title: 'Deep Learning' },
             { number: 4, id: 'nlp_cv',        title: 'NLP и Computer Vision' },
           ],
-          ignored_words: ['начни', 'давай', 'выбери', 'запусти', 'проверь', 'интервью', 'по', 'тему'],
+          ignored_words: ['начни', 'давай', 'выбери', 'запусти', 'тему', 'квиз'],
+        },
+      };
+    }
+    if (status === 'length-pick') {
+      return {
+        item_selector: {
+          items: [
+            { number: 1, id: '5',   title: '5 вопросов' },
+            { number: 2, id: '10',  title: '10 вопросов' },
+            { number: 3, id: '20',  title: '20 вопросов' },
+            { number: 4, id: 'all', title: 'весь банк' },
+          ],
+          ignored_words: ['давай', 'хочу', 'возьми', 'вопросов'],
+        },
+      };
+    }
+    if (status === 'quiz') {
+      const q = questionPlan[questionIdx];
+      if (!q) return { item_selector: { items: [] } };
+      return {
+        item_selector: {
+          items: q.options.map((text, idx) => ({
+            number: idx + 1,
+            id: String(idx),
+            title: text,
+          })),
+          ignored_words: ['вариант', 'ответ', 'номер'],
         },
       };
     }
@@ -75,159 +95,145 @@ export class App extends React.Component {
   dispatchAssistantAction(action) {
     if (!action) return;
     switch (action.type) {
-      case 'START_INTERVIEW':
-        return this.handleStartInterview(action.topic);
-      case 'USER_ANSWER':
-        return this.handleUserAnswer(action.text);
-      case 'FINISH_ANSWER':
-        return this.handleFinishAnswer();
+      case 'CHOOSE_TOPIC':
+        return this.applyChooseTopic(action.topic);
+      case 'CHOOSE_LENGTH':
+        return this.applyChooseLength(action.length);
+      case 'PICK_OPTION':
+        return this.applyPickOption(action.optionIndex);
+      case 'DONT_KNOW':
+        return this.applyDontKnow();
       case 'NEXT_QUESTION':
-      case 'GIVE_UP':
-        return this.handleNextQuestion();
-      case 'END_INTERVIEW':
-        return this.handleEndOrFinish();
-      case 'SHOW_RESULTS':
-        return this.handleShowResults();
+        return this.applyNextQuestion();
+      case 'FINISH_QUIZ':
+        return this.applyFinishQuiz();
+      case 'START_AGAIN':
+        return this.applyStartAgain();
       default:
         console.warn('Unknown action type:', action.type);
     }
   }
 
-  applyEvaluateResponse(data) {
-    const { stateUpdate, speechText } = decodeEvaluateResponse(data, this.state.currentTopic);
-    // setState принимает и объект, и функцию-апдейтер — отдаём как есть.
-    this.setState(stateUpdate);
-    speak(this.assistant, speechText);
+  applyChooseTopic = (topic) => {
+    this.setState((s) => chooseTopic(s, topic));
+    speak(this.assistant, `Тема: ${TOPIC_VOICE_LABELS[topic] || topic}. Сколько вопросов пройти?`);
+  };
+
+  applyChooseLength = (length) => {
+    const parsed = length === 'all' ? 'all' : Number(length);
+    this.setState(
+      (s) => chooseLength(s, parsed),
+      () => this.speakCurrentQuestion(),
+    );
+  };
+
+  applyPickOption = (optionIndex) => {
+    const idx = Number(optionIndex);
+    if (!Number.isInteger(idx) || idx < 0 || idx > 3) return;
+    this.setState(
+      (s) => pickAnswer(s, idx),
+      () => this.speakFeedback(),
+    );
+  };
+
+  applyDontKnow = () => {
+    this.setState(
+      (s) => markUnknown(s),
+      () => this.speakFeedback(),
+    );
+  };
+
+  applyNextQuestion = () => {
+    this.setState(
+      (s) => nextQuestion(s),
+      () => {
+        if (this.state.status === 'quiz') this.speakCurrentQuestion();
+        else if (this.state.status === 'results') this.speakResults();
+      },
+    );
+  };
+
+  applyFinishQuiz = () => {
+    this.setState(
+      (s) => finishTopic(s),
+      () => this.speakResults(),
+    );
+  };
+
+  applyStartAgain = () => {
+    this.setState((s) => restart(s));
+  };
+
+  applyResetAll = () => {
+    this.setState(() => resetAll());
+  };
+
+  speakCurrentQuestion() {
+    const { questionPlan, questionIdx } = this.state;
+    const q = questionPlan[questionIdx];
+    if (!q) return;
+    const optionsSpeech = q.options
+      .map((opt, i) => `Вариант ${i + 1}: ${opt}.`)
+      .join(' ');
+    speak(this.assistant, `${q.text} ${optionsSpeech}`);
   }
 
-  // Общий код для async-обработчиков, дёргающих /evaluate, /skip, /finish:
-  // показать загрузку, вызвать API, применить ответ или показать ошибку.
-  // extraBefore нужен для случаев, когда вместе со стартом надо что-то сбросить
-  // в state (например, answerBuffer перед /skip и /finish).
-  async runApi(apiCall, extraBefore = {}) {
-    this.setState({ isLoading: true, lastError: null, ...extraBefore });
-    try {
-      const data = await apiCall();
-      this.applyEvaluateResponse(data);
-    } catch (err) {
-      this.setState({ isLoading: false, lastError: err.message });
-    }
+  speakFeedback() {
+    const { questionPlan, questionIdx, selectedOption, dontKnow } = this.state;
+    const q = questionPlan[questionIdx];
+    if (!q) return;
+    const isCorrect = !dontKnow && selectedOption === q.correct;
+    const lead = dontKnow
+      ? 'Правильный ответ:'
+      : isCorrect
+        ? 'Верно.'
+        : 'Неверно.';
+    speak(this.assistant, `${lead} ${q.explanation}`);
   }
 
-  async handleStartInterview(topic) {
-    if (this.state.isLoading || this.state.status !== 'welcome') return;
-    this.setState({
-      status: 'interview',
-      currentTopic: topic,
-      questionIndex: 1,
-      questionText: '',
-      answerBuffer: '',
-      isLoading: true,
-      lastError: null,
-    });
-    try {
-      const data = await startInterview(this.sessionId, topic);
-      this.setState({ questionText: data.question, isLoading: false });
-      speak(this.assistant, data.pronounce_text);
-    } catch (err) {
-      this.setState({ status: 'welcome', isLoading: false, lastError: err.message });
-    }
-  }
-
-  handleUserAnswer(text) {
-    if (this.state.status !== 'interview' || this.state.isLoading) return;
-    // Защита: initPhrase из createSmartappDebugger иногда прилетает с задержкой
-    // и попадает в USER_ANSWER. Команды запуска начинаются с «запусти/открой/вруби» —
-    // фильтруем их, чтобы они не попали в буфер ответа.
-    if (/^(запусти|открой|вруби)\s/i.test(text)) return;
-    const fragment = (text || '').trim();
-    if (!fragment) return;
-    this.setState((prev) => ({
-      answerBuffer: prev.answerBuffer ? `${prev.answerBuffer} ${fragment}` : fragment,
-      lastError: null,
-    }));
-  }
-
-  handleFinishAnswer() {
-    if (this.state.status !== 'interview' || this.state.isLoading) return;
-    const buffered = this.state.answerBuffer.trim();
-    if (!buffered) {
-      speak(this.assistant, 'Я не услышал ответ. Скажите его и затем «готово».');
-      return;
-    }
-    // Буфер сознательно НЕ чистим до ответа — если запрос упадёт, пользователь
-    // сможет повторить «готово» с тем же ответом.
-    return this.runApi(() => evaluateAnswer(this.sessionId, buffered));
-  }
-
-  handleNextQuestion() {
-    if (this.state.isLoading) return;
-    return this.runApi(() => skipQuestion(this.sessionId), { answerBuffer: '' });
-  }
-
-  handleFinishInterview() {
-    if (this.state.status !== 'interview' || this.state.isLoading) return;
-    return this.runApi(() => finishInterview(this.sessionId), { answerBuffer: '' });
-  }
-
-  handleEndInterview() {
-    this.setState({
-      status: 'welcome',
-      currentTopic: null,
-      questionIndex: 0,
-      questionText: '',
-      answerBuffer: '',
-      isLoading: false,
-      lastError: null,
-    });
-  }
-
-  handleEndOrFinish() {
-    if (this.state.status === 'interview') return this.handleFinishInterview();
-    if (this.state.status === 'results') return this.handleEndInterview();
-  }
-
-  handleShowResults() {
-    if (this.state.status === 'interview') return this.handleFinishInterview();
+  speakResults() {
+    speak(this.assistant, 'Вот результаты. Скажи «пройти ещё тему» или «начать заново».');
   }
 
   render() {
     const {
       status,
       currentTopic,
-      questionIndex,
-      questionText,
-      answerBuffer,
-      isLoading,
+      questionPlan,
+      questionIdx,
+      selectedOption,
+      dontKnow,
       radarScores,
-      lastError,
     } = this.state;
-
-    const isListening = status === 'interview' && !isLoading;
 
     return (
       <ErrorBoundary>
         {status === 'welcome' && (
-          <WelcomeView onSelectTopic={(topic) => this.handleStartInterview(topic)} />
+          <WelcomeView onSelectTopic={this.applyChooseTopic} />
         )}
-        {status === 'interview' && (
-          <InterviewView
+        {status === 'length-pick' && (
+          <LengthPickView onPick={this.applyChooseLength} />
+        )}
+        {(status === 'quiz' || status === 'feedback') && (
+          <QuizView
             topic={currentTopic}
-            questionIndex={questionIndex}
-            questionText={questionText}
-            answerBuffer={answerBuffer}
-            isLoading={isLoading}
-            isListening={isListening}
-            lastError={lastError}
-            onSubmit={() => this.handleFinishAnswer()}
-            onNext={() => this.handleNextQuestion()}
-            onFinish={() => this.handleFinishInterview()}
+            questionIdx={questionIdx}
+            totalQuestions={questionPlan.length}
+            question={questionPlan[questionIdx]}
+            status={status}
+            selectedOption={selectedOption}
+            dontKnow={dontKnow}
+            onPick={(idx) => this.applyPickOption(idx)}
+            onDontKnow={this.applyDontKnow}
+            onNext={this.applyNextQuestion}
+            onFinish={this.applyFinishQuiz}
           />
         )}
         {status === 'results' && (
           <ResultView
             scores={radarScores}
-            onRestart={() => this.handleEndInterview()}
+            onMoreTopic={this.applyStartAgain}
+            onResetAll={this.applyResetAll}
           />
         )}
       </ErrorBoundary>

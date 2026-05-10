@@ -1,20 +1,27 @@
-function startInterview(topic, context) {
+function chooseTopic(topic, context) {
     addAction({
-        type: "START_INTERVIEW",
+        type: "CHOOSE_TOPIC",
         topic: topic
     }, context);
 }
 
-function userAnswer(text, context) {
+function chooseLength(length, context) {
     addAction({
-        type: "USER_ANSWER",
-        text: text
+        type: "CHOOSE_LENGTH",
+        length: length
     }, context);
 }
 
-function finishAnswer(context) {
+function pickOption(optionIndex, context) {
     addAction({
-        type: "FINISH_ANSWER"
+        type: "PICK_OPTION",
+        optionIndex: optionIndex
+    }, context);
+}
+
+function dontKnow(context) {
+    addAction({
+        type: "DONT_KNOW"
     }, context);
 }
 
@@ -24,20 +31,14 @@ function nextQuestion(context) {
     }, context);
 }
 
-function giveUp(context) {
+function finishQuiz(context) {
     addAction({
-        type: "GIVE_UP"
+        type: "FINISH_QUIZ"
     }, context);
 }
 
-function endInterview(context) {
+function startAgain(context) {
     addAction({
-        type: "END_INTERVIEW"
-    }, context);
-}
-
-function showResults(context) {
-    addAction({
-        type: "SHOW_RESULTS"
+        type: "START_AGAIN"
     }, context);
 }
