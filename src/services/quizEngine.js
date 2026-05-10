@@ -118,3 +118,15 @@ export function finishTopic(state) {
     },
   };
 }
+
+export function restart(state) {
+  if (state.status !== 'results') return state;
+  return {
+    ...initial(),
+    radarScores: state.radarScores,
+  };
+}
+
+export function resetAll() {
+  return initial();
+}

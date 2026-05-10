@@ -1,4 +1,4 @@
-import { initial, chooseTopic, chooseLength, pickAnswer, markUnknown, nextQuestion, finishTopic } from './quizEngine';
+import { initial, chooseTopic, chooseLength, pickAnswer, markUnknown, nextQuestion, finishTopic, restart, resetAll } from './quizEngine';
 import { QUESTIONS } from '../data/questions';
 
 describe('quizEngine.initial', () => {
@@ -192,5 +192,37 @@ describe('quizEngine.finishTopic', () => {
   test('игнорируется вне quiz/feedback', () => {
     const base = { ...initial(), status: 'results' };
     expect(finishTopic(base)).toBe(base);
+  });
+});
+
+describe('quizEngine.restart', () => {
+  test('из results возвращает на welcome, сохраняя радар', () => {
+    const radar = { python: 0.6, classical_ml: null, deep_learning: null, nlp_cv: null };
+    const base = { ...initial(), status: 'results', radarScores: radar };
+    const after = restart(base);
+    expect(after.status).toBe('welcome');
+    expect(after.currentTopic).toBeNull();
+    expect(after.questionPlan).toEqual([]);
+    expect(after.radarScores).toEqual(radar);
+  });
+
+  test('игнорируется вне results', () => {
+    const base = { ...initial(), status: 'quiz' };
+    expect(restart(base)).toBe(base);
+  });
+});
+
+describe('quizEngine.resetAll', () => {
+  test('обнуляет радар и кладёт на welcome', () => {
+    const radar = { python: 0.6, classical_ml: 0.4, deep_learning: null, nlp_cv: null };
+    const base = { ...initial(), status: 'results', radarScores: radar };
+    const after = resetAll(base);
+    expect(after.status).toBe('welcome');
+    expect(after.radarScores).toEqual({
+      python: null,
+      classical_ml: null,
+      deep_learning: null,
+      nlp_cv: null,
+    });
   });
 });
