@@ -1,4 +1,4 @@
-import { initial, chooseTopic, chooseLength, pickAnswer, markUnknown } from './quizEngine';
+import { initial, chooseTopic, chooseLength, pickAnswer, markUnknown, nextQuestion, finishTopic } from './quizEngine';
 import { QUESTIONS } from '../data/questions';
 
 describe('quizEngine.initial', () => {
@@ -121,5 +121,76 @@ describe('quizEngine.markUnknown', () => {
   test('игнорируется вне статуса quiz', () => {
     const base = { ...initial(), status: 'feedback' };
     expect(markUnknown(base)).toBe(base);
+  });
+});
+
+function feedbackAt(idx, correctCount = idx) {
+  const s = startedQuiz();
+  return {
+    ...s,
+    status: 'feedback',
+    questionIdx: idx,
+    selectedOption: 0,
+    correctCount,
+  };
+}
+
+describe('quizEngine.nextQuestion', () => {
+  test('переводит из feedback в quiz и инкрементит индекс', () => {
+    // Банк python — 1 вопрос, поэтому используем classical_ml (тоже 1),
+    // но тест на промежуточный шаг: принудительно ставим questionPlan из 2 элементов
+    const s = startedQuiz();
+    // Имитируем план из 2 вопросов чтобы проверить промежуточный переход
+    const twoQuestions = [s.questionPlan[0], s.questionPlan[0]];
+    const inFeedback = { ...s, questionPlan: twoQuestions, status: 'feedback', questionIdx: 0, selectedOption: 0 };
+    const after = nextQuestion(inFeedback);
+    expect(after.status).toBe('quiz');
+    expect(after.questionIdx).toBe(1);
+    expect(after.selectedOption).toBeNull();
+    expect(after.dontKnow).toBe(false);
+  });
+
+  test('после последнего вопроса идёт в results и пишет долю в радар', () => {
+    const s = startedQuiz();
+    const last = s.questionPlan.length - 1;
+    const inFeedback = { ...s, status: 'feedback', questionIdx: last, correctCount: last + 1 };
+    const after = nextQuestion(inFeedback);
+    expect(after.status).toBe('results');
+    expect(after.radarScores.python).toBeCloseTo(1);
+  });
+
+  test('игнорируется вне feedback', () => {
+    const base = startedQuiz();
+    expect(nextQuestion(base)).toBe(base);
+  });
+});
+
+describe('quizEngine.finishTopic', () => {
+  test('из quiz: пишет долю по уже отвеченным и идёт в results', () => {
+    const s = startedQuiz();
+    expect(s.questionPlan.length).toBeGreaterThanOrEqual(1);
+    const mid = { ...s, questionIdx: 1, correctCount: 1 };
+    const after = finishTopic(mid);
+    expect(after.status).toBe('results');
+    expect(after.radarScores.python).toBeCloseTo(1);
+  });
+
+  test('из feedback: текущий вопрос засчитан, доля по questionIdx+1', () => {
+    const inFb = { ...startedQuiz(), status: 'feedback', questionIdx: 0, correctCount: 1 };
+    const after = finishTopic(inFb);
+    expect(after.status).toBe('results');
+    expect(after.radarScores.python).toBeCloseTo(1);
+  });
+
+  test('если ничего не отвечено — радар null (тема не считается пройденной)', () => {
+    const s = startedQuiz();
+    const after = finishTopic(s);
+    expect(after.radarScores.python).toBeNull();
+    expect(after.status).toBe('results');
+  });
+
+  test('игнорируется вне quiz/feedback', () => {
+    const base = { ...initial(), status: 'results' };
+    expect(finishTopic(base)).toBe(base);
   });
 });

@@ -77,3 +77,44 @@ export function markUnknown(state) {
     dontKnow: true,
   };
 }
+
+export function nextQuestion(state) {
+  if (state.status !== 'feedback') return state;
+  const nextIdx = state.questionIdx + 1;
+  if (nextIdx >= state.questionPlan.length) {
+    const total = state.questionPlan.length;
+    return {
+      ...state,
+      status: 'results',
+      radarScores: {
+        ...state.radarScores,
+        [state.currentTopic]: total > 0 ? state.correctCount / total : null,
+      },
+    };
+  }
+  return {
+    ...state,
+    status: 'quiz',
+    questionIdx: nextIdx,
+    selectedOption: null,
+    dontKnow: false,
+  };
+}
+
+export function finishTopic(state) {
+  if (state.status !== 'quiz' && state.status !== 'feedback') return state;
+  // На статусе quiz уже отвечены вопросы 0..questionIdx-1.
+  // На статусе feedback текущий тоже зачтён, поэтому questionIdx+1.
+  const answered = state.status === 'feedback'
+    ? state.questionIdx + 1
+    : state.questionIdx;
+  const score = answered > 0 ? state.correctCount / answered : null;
+  return {
+    ...state,
+    status: 'results',
+    radarScores: {
+      ...state.radarScores,
+      [state.currentTopic]: score,
+    },
+  };
+}
