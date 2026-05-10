@@ -25,7 +25,7 @@ describe('банк вопросов', () => {
       }
       expect(Number.isInteger(q.correct)).toBe(true);
       expect(q.correct).toBeGreaterThanOrEqual(0);
-      expect(q.correct).toBeLessThanOrEqual(3);
+      expect(q.correct).toBeLessThan(q.options.length);
       expect(typeof q.explanation).toBe('string');
       expect(q.explanation.trim().length).toBeGreaterThan(0);
     }
@@ -34,5 +34,10 @@ describe('банк вопросов', () => {
   test.each(TOPICS)('%s: id уникальны внутри темы', (topic) => {
     const ids = QUESTIONS[topic].map((q) => q.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test('id уникальны глобально между темами', () => {
+    const allIds = TOPICS.flatMap((t) => QUESTIONS[t].map((q) => q.id));
+    expect(new Set(allIds).size).toBe(allIds.length);
   });
 });
