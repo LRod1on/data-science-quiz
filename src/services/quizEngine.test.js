@@ -1,4 +1,4 @@
-import { initial, chooseTopic, chooseLength } from './quizEngine';
+import { initial, chooseTopic, chooseLength, pickAnswer, markUnknown } from './quizEngine';
 import { QUESTIONS } from '../data/questions';
 
 describe('quizEngine.initial', () => {
@@ -72,5 +72,54 @@ describe('quizEngine.chooseLength', () => {
     const s = chooseLength(base, 'all', deterministicRandom([0]));
     const ids = s.questionPlan.map((q) => q.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+function startedQuiz(topic = 'python') {
+  const s0 = initial();
+  const s1 = chooseTopic(s0, topic);
+  return chooseLength(s1, 'all', () => 0);
+}
+
+describe('quizEngine.pickAnswer', () => {
+  test('правильный ответ увеличивает correctCount и переводит в feedback', () => {
+    const s = startedQuiz();
+    const correctIdx = s.questionPlan[0].correct;
+    const after = pickAnswer(s, correctIdx);
+    expect(after.status).toBe('feedback');
+    expect(after.selectedOption).toBe(correctIdx);
+    expect(after.dontKnow).toBe(false);
+    expect(after.correctCount).toBe(1);
+  });
+
+  test('неправильный ответ не увеличивает correctCount', () => {
+    const s = startedQuiz();
+    const wrongIdx = (s.questionPlan[0].correct + 1) % 4;
+    const after = pickAnswer(s, wrongIdx);
+    expect(after.status).toBe('feedback');
+    expect(after.selectedOption).toBe(wrongIdx);
+    expect(after.correctCount).toBe(0);
+  });
+
+  test('игнорируется вне статуса quiz', () => {
+    const base = startedQuiz();
+    const inFeedback = pickAnswer(base, base.questionPlan[0].correct);
+    expect(pickAnswer(inFeedback, 0)).toBe(inFeedback);
+  });
+});
+
+describe('quizEngine.markUnknown', () => {
+  test('переводит в feedback с dontKnow=true и не увеличивает correctCount', () => {
+    const s = startedQuiz();
+    const after = markUnknown(s);
+    expect(after.status).toBe('feedback');
+    expect(after.dontKnow).toBe(true);
+    expect(after.selectedOption).toBeNull();
+    expect(after.correctCount).toBe(0);
+  });
+
+  test('игнорируется вне статуса quiz', () => {
+    const base = { ...initial(), status: 'feedback' };
+    expect(markUnknown(base)).toBe(base);
   });
 });

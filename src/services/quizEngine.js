@@ -54,3 +54,26 @@ export function chooseLength(state, length, random = Math.random) {
     dontKnow: false,
   };
 }
+
+export function pickAnswer(state, optionIdx) {
+  if (state.status !== 'quiz') return state;
+  const current = state.questionPlan[state.questionIdx];
+  const isCorrect = optionIdx === current.correct;
+  return {
+    ...state,
+    status: 'feedback',
+    selectedOption: optionIdx,
+    dontKnow: false,
+    correctCount: state.correctCount + (isCorrect ? 1 : 0),
+  };
+}
+
+export function markUnknown(state) {
+  if (state.status !== 'quiz') return state;
+  return {
+    ...state,
+    status: 'feedback',
+    selectedOption: null,
+    dontKnow: true,
+  };
+}
