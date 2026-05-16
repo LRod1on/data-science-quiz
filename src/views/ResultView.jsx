@@ -19,8 +19,11 @@ const Wrapper = styled.div`
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 48px;
-  padding-bottom: calc(48px + var(--bottom-inset, 0px));
+  padding:
+    calc(48px + var(--top-inset, 0px))
+    calc(48px + var(--right-inset, 0px))
+    calc(48px + var(--bottom-inset, 0px))
+    calc(48px + var(--left-inset, 0px));
   box-sizing: border-box;
 `;
 

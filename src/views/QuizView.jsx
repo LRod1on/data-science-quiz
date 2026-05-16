@@ -8,8 +8,11 @@ const Wrapper = styled.div`
   height: 100vh;
   display: flex;
   flex-direction: column;
-  padding: 28px 48px;
-  padding-bottom: calc(28px + var(--bottom-inset, 0px));
+  padding:
+    calc(28px + var(--top-inset, 0px))
+    calc(48px + var(--right-inset, 0px))
+    calc(28px + var(--bottom-inset, 0px))
+    calc(48px + var(--left-inset, 0px));
   box-sizing: border-box;
   overflow: hidden;
 `;

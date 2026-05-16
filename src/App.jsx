@@ -35,8 +35,12 @@ export class App extends React.Component {
     this.assistant.on('data', (event) => {
       if (event.type === 'character' || event.type === 'tts') return;
       if (event.type === 'insets' || event.type === 'dynamic_insets') {
-        const bottom = event?.insets?.bottom ?? 0;
-        document.documentElement.style.setProperty('--bottom-inset', `${bottom}px`);
+        const { top = 0, right = 0, bottom = 0, left = 0 } = event?.insets ?? {};
+        const root = document.documentElement.style;
+        root.setProperty('--top-inset', `${top}px`);
+        root.setProperty('--right-inset', `${right}px`);
+        root.setProperty('--bottom-inset', `${bottom}px`);
+        root.setProperty('--left-inset', `${left}px`);
         return;
       }
       this.dispatchAssistantAction(event.action);
