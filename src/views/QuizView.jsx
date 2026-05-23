@@ -32,17 +32,21 @@ const Badge = styled.div`
 `;
 
 const QuestionText = styled.h2`
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1.35;
   color: #fff;
   margin: 0 0 18px;
   text-align: center;
-  flex: 0 0 auto;
+  // Разрешаем шринк, чтобы длинные вопросы не выпихивали кнопки
+  // за пределы 100vh (Wrapper стоит на overflow: hidden).
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-wrap: anywhere;
 `;
 
 const OptionsGrid = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
   max-width: 960px;
   width: 100%;
@@ -61,6 +65,11 @@ const Option = styled.button`
   color: #fff;
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
+  // По умолчанию grid-айтемы имеют min-width: auto и распирают колонку
+  // под самое длинное слово — из-за этого 2-й и 4-й варианты вылезали
+  // за правую границу грида.
+  min-width: 0;
+  overflow-wrap: anywhere;
 
   &:hover:not(:disabled),
   &:focus:not(:disabled) {
@@ -112,7 +121,8 @@ const ExplanationLead = styled.div`
 const Buttons = styled.div`
   display: flex;
   justify-content: center;
-  gap: 20px;
+  flex-wrap: wrap;
+  gap: 16px;
   margin-top: 18px;
   flex: 0 0 auto;
 `;
@@ -124,7 +134,8 @@ const Button = styled.button`
   color: #fff;
   font-size: 20px;
   padding: 10px 24px;
-  min-width: 200px;
+  // Раньше стояло min-width: 200px — при узких safe-area-зонах две
+  // кнопки с центрированием уезжали за края (левый край «Не знаю» прятался).
   cursor: pointer;
   transition: background 0.15s;
 

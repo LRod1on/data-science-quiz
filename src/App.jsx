@@ -118,16 +118,29 @@ export class App extends React.Component {
     }
   }
 
+  // Все handler'ы ниже озвучивают только если квиз реально перешёл в нужный
+  // статус. Иначе ассистент болтает на ровном месте, когда .sc-сценарий
+  // прислал action не подходящий под текущий экран (например, ловит «первый»
+  // как выбор темы, пока пользователь отвечает на вопрос).
+
   applyChooseTopic = (topic) => {
-    this.setState((s) => chooseTopic(s, topic));
-    speak(this.assistant, `Тема: ${TOPIC_VOICE_LABELS[topic] || topic}. Сколько вопросов пройти?`);
+    this.setState(
+      (s) => chooseTopic(s, topic),
+      () => {
+        if (this.state.status !== 'length-pick') return;
+        speak(this.assistant, `Тема: ${TOPIC_VOICE_LABELS[topic] || topic}. Сколько вопросов пройти?`);
+      },
+    );
   };
 
   applyChooseLength = (length) => {
     const parsed = length === 'all' ? 'all' : Number(length);
     this.setState(
       (s) => chooseLength(s, parsed),
-      () => this.speakCurrentQuestion(),
+      () => {
+        if (this.state.status !== 'quiz') return;
+        this.speakCurrentQuestion();
+      },
     );
   };
 
@@ -136,14 +149,20 @@ export class App extends React.Component {
     if (!Number.isInteger(idx) || idx < 0 || idx > 3) return;
     this.setState(
       (s) => pickAnswer(s, idx),
-      () => this.speakFeedback(),
+      () => {
+        if (this.state.status !== 'feedback') return;
+        this.speakFeedback();
+      },
     );
   };
 
   applyDontKnow = () => {
     this.setState(
       (s) => markUnknown(s),
-      () => this.speakFeedback(),
+      () => {
+        if (this.state.status !== 'feedback') return;
+        this.speakFeedback();
+      },
     );
   };
 
@@ -160,7 +179,10 @@ export class App extends React.Component {
   applyFinishQuiz = () => {
     this.setState(
       (s) => finishTopic(s),
-      () => this.speakResults(),
+      () => {
+        if (this.state.status !== 'results') return;
+        this.speakResults();
+      },
     );
   };
 

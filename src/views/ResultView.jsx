@@ -35,7 +35,7 @@ const Title = styled.h1`
 `;
 
 const ChartWrapper = styled.div`
-  width: 360px;
+  width: 480px;
   height: 360px;
   margin-bottom: 28px;
 `;
@@ -84,6 +84,9 @@ const CHART_OPTIONS = {
   responsive: true,
   maintainAspectRatio: false,
   animation: false,
+  // Боковой padding, чтобы длинные подписи ('NLP & CV', 'Classical ML')
+  // не упирались в края canvas и не обрезались.
+  layout: { padding: { left: 32, right: 32 } },
   scales: {
     r: {
       min: 0,
