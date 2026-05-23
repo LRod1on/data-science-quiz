@@ -106,3 +106,36 @@ dist
 _temp/
 
 .idea/
+
+# Дополнения для проекта
+
+# Все .env-файлы (кроме примеров вроде .env.sample)
+.env*
+!.env.sample
+!.env.example
+
+# Мусор ОС
+.DS_Store
+Thumbs.db
+
+# Claude Code: локальные настройки и планы
+.claude/
+CLAUDE.local.md
+
+# Пустой корневой plans/ (актуальные планы — в docs/superpowers/plans/)
+/plans/
+
+# Python-кэш
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Пересборки SmartApp для загрузки в Studio
+# (актуальный архив сценариев scenario-new.zip и build/ остаются под git)
+/smartapp-frontend/
+/smartapp-frontend.zip
+/ds-quiz-smartapp/
+/ds-quiz-smartapp.zip
+
+# Документы и заметки в корне
+*.docx
